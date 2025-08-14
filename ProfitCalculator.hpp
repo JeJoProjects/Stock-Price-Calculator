@@ -95,9 +95,7 @@ public:
          SetWindowText(edit, L"");
          return;
       }
-      std::wostringstream oss;
-      oss << std::fixed << std::setprecision(2) << value;
-      SetWindowText(edit, oss.str().c_str());
+      SetWindowText(edit, toStdString(value).c_str());
    }
 
    void Calculate()
@@ -245,7 +243,8 @@ public:
    double GetSharePrice() const { return GetEditValue(mSharePriceEdit); }
    double GetTotalShares() const { return GetEditValue(mTotalSharesEdit); }
    double GetProfit() const { return GetEditValue(mProfitEdit); }
-   bool HasValidData() const {
+   bool HasValidData() const 
+   {
       return GetTotalInvestment() > 0 && GetSharePrice() > 0 && GetTotalShares() > 0;
    }
 };

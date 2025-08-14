@@ -36,9 +36,16 @@ inline constexpr std::array excluded_fields
     ControlId::profitInvest, ControlId::targetPrice
 };
 
-
 template <typename T>
 inline constexpr HMENU toHMENU(T id) noexcept
 {
     return (HMENU)(INT_PTR)(static_cast<int>(id));
+}
+
+
+inline auto toStdString(const double value)
+{
+   std::wostringstream oss;
+   oss << std::fixed << std::setprecision(2) << value;
+   return oss.str();
 }
