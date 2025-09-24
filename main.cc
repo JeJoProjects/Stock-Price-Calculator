@@ -122,7 +122,8 @@ public:
       }
    }
 
-   bool CreateMainWindow(HINSTANCE hInstance) {
+   bool CreateMainWindow(HINSTANCE hInstance) 
+   {
       constexpr auto className = L"CurrencyConverterClass";
 
       WNDCLASSEXW wc{};
@@ -421,7 +422,8 @@ private:
       return rate;
    }
 
-   double ParseExchangeRate(const std::string& json, const char* field) {
+   double ParseExchangeRate(const std::string& json, const char* field) 
+   {
       try {
          // Create regex pattern for the field
          std::string pattern = std::format(R"("{}"[^:]*:\s*([0-9]+\.?[0-9]*))", field);
@@ -451,7 +453,8 @@ private:
       return 0.0;
    }
 
-   void UpdateRateDisplay() {
+   void UpdateRateDisplay() 
+   {
       double rate = currentRate.load();
       if (rate > 0) {
          auto rateText = std::format(
@@ -462,7 +465,8 @@ private:
       }
    }
 
-   void DisplayError() {
+   void DisplayError() 
+   {
       auto errorText = std::format(L"Error: {}\nRetrying in 30 seconds...", lastError);
       SetWindowTextW(hStaticRate, errorText.c_str());
    }
@@ -476,7 +480,8 @@ private:
 
       isUpdating.store(true);
 
-      if (controlId == ID_EDIT_EUR) {
+      if (controlId == ID_EDIT_EUR)
+      {
          GetWindowTextW(hEditEUR, buffer, std::size(buffer));
          value = _wtof(buffer);
          double usdValue = value / rate;
@@ -484,7 +489,8 @@ private:
          auto usdStr = std::format(L"{:.2f}", usdValue);
          SetWindowTextW(hEditUSD, usdStr.c_str());
       }
-      else if (controlId == ID_EDIT_USD) {
+      else if (controlId == ID_EDIT_USD) 
+      {
          GetWindowTextW(hEditUSD, buffer, std::size(buffer));
          value = _wtof(buffer);
          double eurValue = value * rate;
@@ -496,7 +502,8 @@ private:
       isUpdating.store(false);
    }
 
-   std::wstring GetCurrentTimeString() {
+   std::wstring GetCurrentTimeString() 
+   {
       auto now = std::chrono::system_clock::now();
       auto time_t = std::chrono::system_clock::to_time_t(now);
 
@@ -508,7 +515,8 @@ private:
    }
 };
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) 
+{
    InitCommonControls();
 
    CurrencyConverter app;
@@ -524,6 +532,68 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
    }
 
    return static_cast<int>(msg.wParam);
+}
+
+#elif 0
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <set>
+
+int main() {
+   // Use the WSL path directly
+   std::string inputFile = "\\\\wsl.localhost\\Ubuntu-22.04\\home\\joj4fe\\PRJ_DRIVING\\logDoc.txt";
+   std::string outputFile = "out.txt";
+
+   std::ifstream inFile(inputFile.c_str());
+   if (!inFile.is_open()) {
+      std::cerr << "Error: Could not open input file: " << inputFile << std::endl;
+      std::cerr << "Make sure WSL is running and the file exists at the specified path" << std::endl;
+      return 1;
+   }
+
+   std::set<std::string> unknownOptions;
+   std::string line;
+   std::string searchPattern = "unknown option:";
+
+   while (std::getline(inFile, line)) {
+      size_t pos = line.find(searchPattern);
+      if (pos != std::string::npos) {
+         size_t quoteStart = line.find('"', pos + searchPattern.length());
+         if (quoteStart != std::string::npos) {
+            size_t quoteEnd = line.find('"', quoteStart + 1);
+            if (quoteEnd != std::string::npos) {
+               std::string option = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+               unknownOptions.insert(option);
+            }
+         }
+      }
+   }
+
+   inFile.close();
+
+   std::ofstream outFile(outputFile.c_str());
+   if (!outFile.is_open()) {
+      std::cerr << "Error: Could not create output file: " << outputFile << std::endl;
+      return 1;
+   }
+
+   std::cout << "Found " << unknownOptions.size() << " unique unknown options:" << std::endl;
+
+   for (std::set<std::string>::const_iterator it = unknownOptions.begin();
+      it != unknownOptions.end(); ++it) {
+      std::cout << "  " << *it << std::endl;
+      outFile << *it << std::endl;
+   }
+
+   outFile.close();
+   std::cout << "Results saved to: " << outputFile << std::endl;
+
+   // Keep console open to see the output
+   std::cout << "Press Enter to exit...";
+   std::cin.get();
+
+   return 0;
 }
 
 #endif

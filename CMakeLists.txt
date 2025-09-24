@@ -19,4 +19,5 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 enable_testing()
 add_executable(${PROJECT_NAME} WIN32 ${SOURCES})  # Added WIN32 here
+#add_executable(${PROJECT_NAME} ${SOURCES})  # Added WIN32 here
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
