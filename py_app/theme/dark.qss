@@ -1,0 +1,375 @@
+/* ======================================================
+   StockCalc — TradingView-inspired Dark Theme
+   ====================================================== */
+
+* {
+    font-family: "Segoe UI", "Inter", sans-serif;
+    font-size: 13px;
+    color: #d1d4dc;
+    outline: none;
+}
+
+QMainWindow, QWidget#centralWidget {
+    background-color: #131722;
+}
+
+/* --- Top Bar --- */
+QWidget#topBar {
+    background-color: #1e222d;
+    border-bottom: 1px solid #363c4e;
+}
+
+QLabel#appTitle {
+    font-size: 17px;
+    font-weight: bold;
+    color: #d1d4dc;
+    padding-left: 8px;
+}
+
+/* --- Search Bar --- */
+QWidget#searchBarContainer {
+    background-color: #131722;
+}
+
+QLineEdit#searchInput {
+    background-color: #2a2e39;
+    border: 1px solid #363c4e;
+    border-radius: 8px;
+    padding: 8px 12px 8px 36px;
+    font-size: 13px;
+    color: #d1d4dc;
+    selection-background-color: #2962ff;
+}
+
+QLineEdit#searchInput:focus {
+    border: 2px solid #2962ff;
+}
+
+QLineEdit#searchInput::placeholder {
+    color: #787b86;
+}
+
+QPushButton#searchClearBtn {
+    background: transparent;
+    border: none;
+    color: #787b86;
+    font-size: 16px;
+    padding: 4px 8px;
+}
+
+QPushButton#searchClearBtn:hover {
+    color: #d1d4dc;
+}
+
+/* --- Autocomplete Dropdown --- */
+QWidget#autocompleteDropdown {
+    background-color: #1e222d;
+    border: 1px solid #363c4e;
+    border-radius: 8px;
+}
+
+QListWidget#autocompleteList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    padding: 4px 0;
+}
+
+QListWidget#autocompleteList::item {
+    padding: 8px 12px;
+    border: none;
+    min-height: 28px;
+}
+
+QListWidget#autocompleteList::item:hover {
+    background-color: #363c4e;
+}
+
+QListWidget#autocompleteList::item:selected {
+    background-color: rgba(41, 98, 255, 0.12);
+    border-left: 3px solid #2962ff;
+}
+
+/* --- Purchase Panel Card --- */
+QFrame#purchaseCard {
+    background-color: #1e222d;
+    border: 1px solid #363c4e;
+    border-radius: 12px;
+}
+
+QLabel#cardTitle {
+    font-size: 15px;
+    font-weight: bold;
+    color: #d1d4dc;
+}
+
+QLabel#tickerLabel {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 15px;
+    font-weight: bold;
+    color: #2962ff;
+}
+
+QLabel#companyLabel {
+    font-size: 11px;
+    color: #787b86;
+}
+
+QLabel.fieldLabel {
+    font-size: 11px;
+    color: #787b86;
+    padding-bottom: 2px;
+}
+
+QLineEdit.fieldInput {
+    background-color: #2a2e39;
+    border: 1px solid #363c4e;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 13px;
+    color: #d1d4dc;
+}
+
+QLineEdit.fieldInput:focus {
+    border: 2px solid #2962ff;
+}
+
+QLineEdit.inferredField {
+    background-color: #2a2e39;
+    border: 1px solid #363c4e;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 13px;
+    color: #787b86;
+    border-left: 3px solid #2962ff;
+}
+
+QLabel#autoBadge {
+    font-size: 9px;
+    color: #2962ff;
+    background-color: rgba(41, 98, 255, 0.12);
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+
+/* --- Separator line inside card --- */
+QFrame#cardSeparator {
+    background-color: #363c4e;
+    max-height: 1px;
+    min-height: 1px;
+}
+
+/* --- Output values --- */
+QLabel.outputValue {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: #d1d4dc;
+}
+
+QLabel.profitPositive {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: #089981;
+}
+
+QLabel.profitNegative {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: #f23645;
+}
+
+QLabel.profitZero {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 14px;
+    color: #787b86;
+}
+
+/* --- Reset button (per card) --- */
+QPushButton#resetBtn {
+    background-color: transparent;
+    border: 1px solid #363c4e;
+    border-radius: 6px;
+    color: #787b86;
+    font-size: 12px;
+    padding: 6px 16px;
+}
+
+QPushButton#resetBtn:hover {
+    border-color: #f23645;
+    color: #f23645;
+}
+
+/* --- Delete panel button --- */
+QPushButton#deleteBtn {
+    background: transparent;
+    border: none;
+    color: #787b86;
+    font-size: 14px;
+    padding: 2px 6px;
+}
+
+QPushButton#deleteBtn:hover {
+    color: #f23645;
+}
+
+/* --- New Purchase placeholder card --- */
+QFrame#newPurchaseCard {
+    background-color: transparent;
+    border: 2px dashed #363c4e;
+    border-radius: 12px;
+}
+
+QFrame#newPurchaseCard:hover {
+    border-color: #2962ff;
+}
+
+QLabel#newPurchaseIcon {
+    font-size: 32px;
+    color: #787b86;
+}
+
+QFrame#newPurchaseCard:hover QLabel#newPurchaseIcon {
+    color: #2962ff;
+}
+
+QLabel#newPurchaseLabel {
+    font-size: 12px;
+    color: #787b86;
+}
+
+QFrame#newPurchaseCard:hover QLabel#newPurchaseLabel {
+    color: #2962ff;
+}
+
+/* --- Combined Stats Bar --- */
+QWidget#combinedBar {
+    background-color: #1e222d;
+    border-top: 1px solid #363c4e;
+}
+
+QLabel.statLabel {
+    font-size: 11px;
+    color: #787b86;
+}
+
+QLabel.statValue {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+QLabel.statValueGreen {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: #089981;
+}
+
+QLabel.statValueRed {
+    font-family: "Consolas", "Cascadia Code", monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: #f23645;
+}
+
+/* --- Reset All button --- */
+QPushButton#resetAllBtn {
+    background-color: #f23645;
+    border: none;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 8px 20px;
+}
+
+QPushButton#resetAllBtn:hover {
+    background-color: #d42f3d;
+}
+
+QPushButton#resetAllBtn:pressed {
+    background-color: #b22833;
+}
+
+/* --- Icon buttons (top bar) --- */
+QPushButton.iconBtn {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 16px;
+    color: #787b86;
+    min-width: 28px;
+    min-height: 28px;
+}
+
+QPushButton.iconBtn:hover {
+    background-color: #363c4e;
+    color: #d1d4dc;
+}
+
+/* --- Scroll Area --- */
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+
+QScrollBar:horizontal {
+    background-color: #131722;
+    height: 8px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #363c4e;
+    border-radius: 4px;
+    min-width: 40px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #787b86;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+QScrollBar:vertical {
+    background-color: #131722;
+    width: 8px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #363c4e;
+    border-radius: 4px;
+    min-height: 40px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #787b86;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+/* --- Tooltip --- */
+QToolTip {
+    background-color: #363c4e;
+    color: #d1d4dc;
+    border: 1px solid #787b86;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}

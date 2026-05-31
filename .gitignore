@@ -1,120 +1,51 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
+# === C++ Build Artifacts ===
 *.o
 *.obj
+*.slo
+*.lo
+*.d
 *.sln
-
-# Precompiled Headers
 *.gch
 *.pch
-
-# Linker files
 *.ilk
-
-# Debugger Files
 *.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
 *.dwo
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-*.sln
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
 *.so
 *.dylib
 *.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
 *.lai
 *.la
 *.a
 *.lib
-
-# Executables
 *.exe
 *.out
 *.app
+*.mod
+*.smod
 
-Builds/
-Build/# Prerequisites
-builds/
+# CMake
+Build/
 build/
-*.d
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+*.spec
+.pytest_cache/
 
-# Precompiled Headers
-*.gch
-*.pch
+# === IDE ===
+.vs/
+.vscode/
+*.suo
+*.user
 
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# === OS ===
+Thumbs.db
+.DS_Store
