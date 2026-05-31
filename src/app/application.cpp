@@ -8,21 +8,39 @@
 #include <algorithm>
 #include <cctype>
 
-static constexpr float kBasePanelWidth = 280.0f;
-static constexpr float kBaseFontSize = 15.0f;
 static constexpr float kPanelSpacing = 16.0f;
 static constexpr float kTopBarHeight = 48.0f;
 static constexpr float kSearchBarHeight = 52.0f;
 static constexpr float kStatsBarHeight = 72.0f;
 static constexpr float kCardRadius = 12.0f;
 static constexpr float kInputRadius = 6.0f;
+static constexpr float kPanelPadding = 16.0f;
 
 static float panelWidth(float fontSize) {
-    return kBasePanelWidth * (fontSize / kBaseFontSize);
+    // Measure based on the widest content that must fit:
+    // label (~80px) + gap + value like "+$888,888.88" in mono font + padding
+    ImFont* mono = theme::getMonoFont();
+    float valueWidth = 0;
+    if (mono) {
+        ImGui::PushFont(mono);
+        valueWidth = ImGui::CalcTextSize("+$888,888.88").x;
+        ImGui::PopFont();
+    } else {
+        valueWidth = ImGui::CalcTextSize("+$888,888.88").x;
+    }
+    float labelWidth = ImGui::CalcTextSize("Investment").x;
+    float minWidth = labelWidth + valueWidth + kPanelPadding * 2 + 24.0f;
+    // Also ensure input fields have room (they fill width)
+    float inputMin = ImGui::CalcTextSize("Total Investment ($)").x + kPanelPadding * 2 + 16.0f;
+    return std::max(minWidth, inputMin);
+    (void)fontSize;
 }
 
-static float panelMinHeight(float fontSize) {
-    return 440.0f * (fontSize / kBaseFontSize);
+static float panelMinHeight(float /*fontSize*/) {
+    // Let ImGui auto-size; we just need a reasonable minimum
+    float lineH = ImGui::GetTextLineHeightWithSpacing();
+    // ~20 lines of content: title, ticker, separator, 4 inputs with labels, badge, separator, 6 output rows, button
+    return lineH * 22.0f + kPanelPadding * 2;
 }
 
 static int numericInputFilter(ImGuiInputTextCallbackData* data) {
@@ -496,8 +514,19 @@ void Application::renderSinglePanel(int index) {
             ImGui::TextUnformatted(lbl);
             ImGui::PopStyleColor();
 
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x -
-                ImGui::CalcTextSize(val.c_str()).x + ImGui::GetCursorPosX());
+            // Measure value width using the mono font it will be rendered in
+            float valWidth;
+            if (mono) {
+                ImGui::PushFont(mono);
+                valWidth = ImGui::CalcTextSize(val.c_str()).x;
+                ImGui::PopFont();
+            } else {
+                valWidth = ImGui::CalcTextSize(val.c_str()).x;
+            }
+
+            // Right-align: position = window content width - value width
+            float windowWidth = ImGui::GetWindowContentRegionMax().x;
+            ImGui::SameLine(windowWidth - valWidth);
 
             if (mono) ImGui::PushFont(mono);
             if (color) ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(color));
