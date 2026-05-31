@@ -101,6 +101,10 @@ void Application::update() {
     if (state_.showPreferences) renderPreferencesDialog();
     if (state_.showAbout) renderAboutDialog();
 
+    // Poll for async online search results
+    if (searchEngine_.hasOnlineResults() && state_.searchDropdownOpen) {
+        mergeOnlineResults();
+    }
 }
 
 void Application::renderMainWindow() {
@@ -216,37 +220,21 @@ void Application::renderSearchBar() {
     ImGui::PopStyleVar();
 
     if (changed && !state_.searchQuery.empty()) {
+        // Instant: show offline results immediately (<1ms)
         state_.searchResults.clear();
-
-        // Try online search first (2+ chars to avoid spamming on single char)
-        if (state_.searchQuery.size() >= 2) {
-            auto online = searchEngine_.searchOnline(state_.searchQuery, state_.maxSearchResults);
-            for (auto& r : online) {
-                state_.searchResults.push_back({
-                    std::move(r.symbol), std::move(r.name), std::move(r.exchange), 200
-                });
-            }
+        auto offline = searchEngine_.search(state_.searchQuery, state_.maxSearchResults);
+        for (const auto& r : offline) {
+            state_.searchResults.push_back({
+                r.entry->symbol, r.entry->name, r.entry->exchange, r.score
+            });
         }
-
-        // Fill remaining slots with offline results
-        if (static_cast<int>(state_.searchResults.size()) < state_.maxSearchResults) {
-            int remaining = state_.maxSearchResults - static_cast<int>(state_.searchResults.size());
-            auto offline = searchEngine_.search(state_.searchQuery, remaining);
-            for (const auto& r : offline) {
-                bool duplicate = false;
-                for (const auto& existing : state_.searchResults) {
-                    if (existing.symbol == r.entry->symbol) { duplicate = true; break; }
-                }
-                if (!duplicate) {
-                    state_.searchResults.push_back({
-                        r.entry->symbol, r.entry->name, r.entry->exchange, r.score
-                    });
-                }
-            }
-        }
-
-        state_.searchDropdownOpen = !state_.searchResults.empty();
+        state_.searchDropdownOpen = true;
         state_.searchSelectedIndex = 0;
+
+        // Async: fire online search in background thread (merges when ready)
+        if (state_.searchQuery.size() >= 2) {
+            searchEngine_.requestOnline(state_.searchQuery, state_.maxSearchResults);
+        }
     } else if (state_.searchQuery.empty()) {
         state_.searchDropdownOpen = false;
         state_.searchResults.clear();
@@ -878,4 +866,32 @@ void Application::applySearchResult(const search::TickerEntry& entry) {
     panel.tickerSymbol = entry.symbol;
     panel.companyName = entry.name;
     panel.exchange = entry.exchange;
+}
+
+void Application::mergeOnlineResults() {
+    auto online = searchEngine_.takeOnlineResults();
+    if (online.empty()) return;
+
+    // Insert online results at the top, dedup against existing
+    std::vector<SearchResultEntry> merged;
+    merged.reserve(state_.maxSearchResults);
+
+    for (auto& r : online) {
+        if (static_cast<int>(merged.size()) >= state_.maxSearchResults) break;
+        merged.push_back({std::move(r.symbol), std::move(r.name), std::move(r.exchange), 200});
+    }
+
+    for (const auto& existing : state_.searchResults) {
+        if (static_cast<int>(merged.size()) >= state_.maxSearchResults) break;
+        bool dup = false;
+        for (const auto& m : merged) {
+            if (m.symbol == existing.symbol) { dup = true; break; }
+        }
+        if (!dup) merged.push_back(existing);
+    }
+
+    state_.searchResults = std::move(merged);
+    if (state_.searchSelectedIndex >= static_cast<int>(state_.searchResults.size())) {
+        state_.searchSelectedIndex = 0;
+    }
 }

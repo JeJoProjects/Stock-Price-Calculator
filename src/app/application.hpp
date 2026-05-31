@@ -40,4 +40,5 @@ private:
     void recalculateAll();
     void handleShortcuts();
     void applySearchResult(const search::TickerEntry& entry);
+    void mergeOnlineResults();
 };

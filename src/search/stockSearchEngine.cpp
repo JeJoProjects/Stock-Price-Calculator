@@ -4,7 +4,6 @@
 #include <cctype>
 #include <cstdio>
 #include <array>
-#include <filesystem>
 
 #ifdef _WIN32
 #define popen _popen
@@ -30,6 +29,10 @@ static std::string extractJsonString(const std::string& json, std::size_t startP
     auto end = json.find('"', pos);
     if (end == std::string::npos) return {};
     return json.substr(pos, end - pos);
+}
+
+StockSearchEngine::~StockSearchEngine() {
+    if (onlineThread_.joinable()) onlineThread_.join();
 }
 
 void StockSearchEngine::findPython() {
@@ -69,7 +72,6 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
 
     for (const auto& t : tickers_) {
         if (t.symbolLower.starts_with(q)) continue;
-
         if (t.symbolLower.find(q) != std::string::npos) {
             results.push_back({&t, 50});
         } else if (t.nameLower.find(q) != std::string::npos) {
@@ -78,22 +80,32 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
     }
 
     std::ranges::sort(results, std::greater{}, &SearchResult::score);
-
-    if (static_cast<int>(results.size()) > maxResults) {
-        results.resize(maxResults);
-    }
-
+    if (static_cast<int>(results.size()) > maxResults) results.resize(maxResults);
     return results;
 }
 
-std::vector<OnlineResult> StockSearchEngine::searchOnline(const std::string& query, int maxResults) const {
-    if (query.empty() || pythonPath_.empty()) return {};
+void StockSearchEngine::requestOnline(const std::string& query, int maxResults) {
+    if (pythonPath_.empty() || query.size() < 2) return;
 
+    unsigned newId = ++requestId_;
+    onlineReady_.store(false);
+
+    if (onlineThread_.joinable()) onlineThread_.join();
+
+    onlineBusy_.store(true);
+    onlineThread_ = std::thread(&StockSearchEngine::runOnlineSearch, this,
+        query, maxResults, newId);
+}
+
+void StockSearchEngine::runOnlineSearch(std::string query, int maxResults, unsigned reqId) {
     std::string cmd = "\"" + pythonPath_ + "\" scripts/search_symbols.py "
         + query + " 2>nul";
 
     FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return {};
+    if (!pipe) {
+        onlineBusy_.store(false);
+        return;
+    }
 
     std::string output;
     std::array<char, 4096> buf{};
@@ -102,29 +114,46 @@ std::vector<OnlineResult> StockSearchEngine::searchOnline(const std::string& que
     }
     pclose(pipe);
 
-    if (output.empty() || output[0] != '[') return {};
-
-    // Parse JSON array of {symbol, name, exchange}
-    std::vector<OnlineResult> results;
-    std::size_t pos = 0;
-    while ((pos = output.find('{', pos)) != std::string::npos) {
-        auto end = output.find('}', pos);
-        if (end == std::string::npos) break;
-
-        OnlineResult r;
-        r.symbol = extractJsonString(output, pos, "symbol");
-        r.name = extractJsonString(output, pos, "name");
-        r.exchange = extractJsonString(output, pos, "exchange");
-
-        if (!r.symbol.empty()) {
-            results.push_back(std::move(r));
-        }
-        pos = end + 1;
-
-        if (static_cast<int>(results.size()) >= maxResults) break;
+    // Stale request — a newer one was fired while this ran
+    if (reqId != requestId_.load()) {
+        onlineBusy_.store(false);
+        return;
     }
 
-    return results;
+    std::vector<OnlineResult> results;
+    if (!output.empty() && output[0] == '[') {
+        std::size_t pos = 0;
+        while ((pos = output.find('{', pos)) != std::string::npos) {
+            auto end = output.find('}', pos);
+            if (end == std::string::npos) break;
+
+            OnlineResult r;
+            r.symbol = extractJsonString(output, pos, "symbol");
+            r.name = extractJsonString(output, pos, "name");
+            r.exchange = extractJsonString(output, pos, "exchange");
+
+            if (!r.symbol.empty()) results.push_back(std::move(r));
+            pos = end + 1;
+            if (static_cast<int>(results.size()) >= maxResults) break;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        onlineResults_ = std::move(results);
+    }
+    onlineReady_.store(true);
+    onlineBusy_.store(false);
+}
+
+bool StockSearchEngine::hasOnlineResults() const {
+    return onlineReady_.load();
+}
+
+std::vector<OnlineResult> StockSearchEngine::takeOnlineResults() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    onlineReady_.store(false);
+    return std::move(onlineResults_);
 }
 
 } // namespace search
