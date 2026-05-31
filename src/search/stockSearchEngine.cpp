@@ -2,6 +2,14 @@
 #include <algorithm>
 #include <ranges>
 #include <cctype>
+#include <cstdio>
+#include <array>
+#include <filesystem>
+
+#ifdef _WIN32
+#define popen _popen
+#define pclose _pclose
+#endif
 
 namespace search {
 
@@ -12,8 +20,38 @@ static std::string toLower(std::string_view sv) {
     return result;
 }
 
+static std::string extractJsonString(const std::string& json, std::size_t startPos, const std::string& key) {
+    auto kp = "\"" + key + "\"";
+    auto pos = json.find(kp, startPos);
+    if (pos == std::string::npos) return {};
+    pos = json.find('"', pos + kp.size() + 1);
+    if (pos == std::string::npos) return {};
+    ++pos;
+    auto end = json.find('"', pos);
+    if (end == std::string::npos) return {};
+    return json.substr(pos, end - pos);
+}
+
+void StockSearchEngine::findPython() {
+    const char* candidates[] = {
+        "C:\\ProgramData\\miniconda3\\python.exe",
+        "C:\\Python312\\python.exe",
+        "C:\\Python311\\python.exe",
+        "C:\\Python310\\python.exe",
+        "python",
+    };
+    for (const auto* path : candidates) {
+        std::string cmd = std::string("\"") + path + "\" --version >nul 2>&1";
+        if (std::system(cmd.c_str()) == 0) {
+            pythonPath_ = path;
+            return;
+        }
+    }
+}
+
 void StockSearchEngine::load(const std::string& jsonPath) {
     tickers_ = loadTickers(jsonPath);
+    findPython();
 }
 
 std::vector<SearchResult> StockSearchEngine::search(const std::string& query, int maxResults) const {
@@ -43,6 +81,47 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
 
     if (static_cast<int>(results.size()) > maxResults) {
         results.resize(maxResults);
+    }
+
+    return results;
+}
+
+std::vector<OnlineResult> StockSearchEngine::searchOnline(const std::string& query, int maxResults) const {
+    if (query.empty() || pythonPath_.empty()) return {};
+
+    std::string cmd = "\"" + pythonPath_ + "\" scripts/search_symbols.py "
+        + query + " 2>nul";
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return {};
+
+    std::string output;
+    std::array<char, 4096> buf{};
+    while (std::fgets(buf.data(), static_cast<int>(buf.size()), pipe)) {
+        output += buf.data();
+    }
+    pclose(pipe);
+
+    if (output.empty() || output[0] != '[') return {};
+
+    // Parse JSON array of {symbol, name, exchange}
+    std::vector<OnlineResult> results;
+    std::size_t pos = 0;
+    while ((pos = output.find('{', pos)) != std::string::npos) {
+        auto end = output.find('}', pos);
+        if (end == std::string::npos) break;
+
+        OnlineResult r;
+        r.symbol = extractJsonString(output, pos, "symbol");
+        r.name = extractJsonString(output, pos, "name");
+        r.exchange = extractJsonString(output, pos, "exchange");
+
+        if (!r.symbol.empty()) {
+            results.push_back(std::move(r));
+        }
+        pos = end + 1;
+
+        if (static_cast<int>(results.size()) >= maxResults) break;
     }
 
     return results;

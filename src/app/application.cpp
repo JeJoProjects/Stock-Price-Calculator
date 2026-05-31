@@ -216,13 +216,35 @@ void Application::renderSearchBar() {
     ImGui::PopStyleVar();
 
     if (changed && !state_.searchQuery.empty()) {
-        auto results = searchEngine_.search(state_.searchQuery, state_.maxSearchResults);
         state_.searchResults.clear();
-        for (const auto& r : results) {
-            state_.searchResults.push_back({
-                r.entry->symbol, r.entry->name, r.entry->exchange, r.score
-            });
+
+        // Try online search first (2+ chars to avoid spamming on single char)
+        if (state_.searchQuery.size() >= 2) {
+            auto online = searchEngine_.searchOnline(state_.searchQuery, state_.maxSearchResults);
+            for (auto& r : online) {
+                state_.searchResults.push_back({
+                    std::move(r.symbol), std::move(r.name), std::move(r.exchange), 200
+                });
+            }
         }
+
+        // Fill remaining slots with offline results
+        if (static_cast<int>(state_.searchResults.size()) < state_.maxSearchResults) {
+            int remaining = state_.maxSearchResults - static_cast<int>(state_.searchResults.size());
+            auto offline = searchEngine_.search(state_.searchQuery, remaining);
+            for (const auto& r : offline) {
+                bool duplicate = false;
+                for (const auto& existing : state_.searchResults) {
+                    if (existing.symbol == r.entry->symbol) { duplicate = true; break; }
+                }
+                if (!duplicate) {
+                    state_.searchResults.push_back({
+                        r.entry->symbol, r.entry->name, r.entry->exchange, r.score
+                    });
+                }
+            }
+        }
+
         state_.searchDropdownOpen = !state_.searchResults.empty();
         state_.searchSelectedIndex = 0;
     } else if (state_.searchQuery.empty()) {
@@ -591,17 +613,15 @@ void Application::renderNewPurchaseCard() {
     float ph = panelMinHeight(state_.fontSize);
 
     ImVec2 startPos = ImGui::GetCursorScreenPos();
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, kCardRadius);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
 
-    ImGui::BeginChild("##NewPurchaseCard", ImVec2(pw, ph), ImGuiChildFlags_None);
+    // Full-area invisible button FIRST so the entire card is clickable
+    bool clicked = ImGui::InvisibleButton("##addPanelBtn", ImVec2(pw, ph));
+    bool hovered = ImGui::IsItemHovered();
 
-    bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
     ImU32 borderColor = hovered ? theme::kAccentBlue : theme::kBorder;
     ImU32 textColor = hovered ? theme::kAccentBlue : theme::kTextMuted;
 
+    // Draw dashed border over the invisible button area
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 min = startPos;
     ImVec2 max = ImVec2(min.x + pw, min.y + ph);
@@ -613,6 +633,7 @@ void Application::renderNewPurchaseCard() {
     auto drawDashedLine = [&](float x1, float y1, float x2, float y2) {
         float dx = x2 - x1, dy = y2 - y1;
         float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 0.01f) return;
         float nx = dx / len, ny = dy / len;
         float pos = 0;
         while (pos < len) {
@@ -628,32 +649,28 @@ void Application::renderNewPurchaseCard() {
     drawDashedLine(max.x - r, max.y, min.x + r, max.y);
     drawDashedLine(min.x, max.y - r, min.x, min.y + r);
 
-    float centerY = ph * 0.4f;
-    ImGui::SetCursorPosY(centerY);
+    // Draw centered "+" and "New Purchase" text over the button
+    float centerY = startPos.y + ph * 0.35f;
+    ImFont* font = ImGui::GetFont();
+    float baseSize = ImGui::GetFontSize();
 
-    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(textColor));
-    ImFont* bold = theme::getBoldFont();
-    if (bold) ImGui::PushFont(bold);
+    const char* plusText = "+";
+    float plusSize = baseSize * 2.0f;
+    ImVec2 plusTextSize = font->CalcTextSizeA(plusSize, FLT_MAX, 0, plusText);
+    dl->AddText(font, plusSize,
+        ImVec2(startPos.x + (pw - plusTextSize.x) * 0.5f, centerY),
+        textColor, plusText);
 
-    float plusWidth = ImGui::CalcTextSize("+").x;
-    ImGui::SetCursorPosX((pw - plusWidth) * 0.5f - 16);
-    ImGui::SetWindowFontScale(2.0f);
-    ImGui::TextUnformatted("+");
-    ImGui::SetWindowFontScale(1.0f);
+    const char* label = "New Purchase";
+    ImVec2 labelSize = font->CalcTextSizeA(baseSize, FLT_MAX, 0, label);
+    float labelY = centerY + plusSize + 8.0f;
+    dl->AddText(font, baseSize,
+        ImVec2(startPos.x + (pw - labelSize.x) * 0.5f, labelY),
+        textColor, label);
 
-    if (bold) ImGui::PopFont();
-
-    ImGui::Spacing();
-    helpers::textCentered("New Purchase");
-    ImGui::PopStyleColor();
-
-    if (ImGui::InvisibleButton("##addPanel", ImVec2(pw - 32, ph * 0.3f))) {
+    if (clicked) {
         addPanel();
     }
-
-    ImGui::EndChild();
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar(2);
 }
 
 // ── Combined Stats Bar ───────────────────────────────────────────────────────
