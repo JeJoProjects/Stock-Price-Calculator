@@ -70,6 +70,13 @@ int main() {
             continue;
         }
 
+        // Rebuild fonts between frames (before NewFrame) to avoid atlas crash
+        if (app.needsFontRebuild()) {
+            theme::loadFonts(app.fontSize());
+            theme::applyTradingViewTheme(app.fontSize());
+            app.clearFontRebuild();
+        }
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();

@@ -13,6 +13,9 @@ public:
     Application(GLFWwindow* window, const AppSettings& settings);
     void update();
     void saveSettings(int winW, int winH, int winX, int winY);
+    [[nodiscard]] bool needsFontRebuild() const { return state_.fontRebuildNeeded; }
+    void clearFontRebuild() { state_.fontRebuildNeeded = false; }
+    [[nodiscard]] float fontSize() const { return state_.fontSize; }
 
 private:
     GLFWwindow* window_;

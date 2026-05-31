@@ -8,14 +8,22 @@
 #include <algorithm>
 #include <cctype>
 
-static constexpr float kPanelWidth = 280.0f;
-static constexpr float kPanelMinHeight = 440.0f;
+static constexpr float kBasePanelWidth = 280.0f;
+static constexpr float kBaseFontSize = 15.0f;
 static constexpr float kPanelSpacing = 16.0f;
 static constexpr float kTopBarHeight = 48.0f;
 static constexpr float kSearchBarHeight = 52.0f;
 static constexpr float kStatsBarHeight = 72.0f;
 static constexpr float kCardRadius = 12.0f;
 static constexpr float kInputRadius = 6.0f;
+
+static float panelWidth(float fontSize) {
+    return kBasePanelWidth * (fontSize / kBaseFontSize);
+}
+
+static float panelMinHeight(float fontSize) {
+    return 440.0f * (fontSize / kBaseFontSize);
+}
 
 static int numericInputFilter(ImGuiInputTextCallbackData* data) {
     if (data->EventChar < 256) {
@@ -75,11 +83,6 @@ void Application::update() {
     if (state_.showPreferences) renderPreferencesDialog();
     if (state_.showAbout) renderAboutDialog();
 
-    if (state_.fontRebuildNeeded) {
-        theme::loadFonts(state_.fontSize);
-        theme::applyTradingViewTheme(state_.fontSize);
-        state_.fontRebuildNeeded = false;
-    }
 }
 
 void Application::renderMainWindow() {
@@ -324,6 +327,9 @@ void Application::renderSearchDropdown() {
 // ── Panel Area ───────────────────────────────────────────────────────────────
 
 void Application::renderPanelArea() {
+    float pw = panelWidth(state_.fontSize);
+    float ph = panelMinHeight(state_.fontSize);
+
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24, 24));
     ImGui::BeginChild("##PanelScroll", ImVec2(0, 0), ImGuiChildFlags_None,
         ImGuiWindowFlags_HorizontalScrollbar);
@@ -336,7 +342,7 @@ void Application::renderPanelArea() {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgSecondary));
 
         ImGui::BeginChild(state_.panels[i].id + 1000,
-            ImVec2(kPanelWidth, kPanelMinHeight), ImGuiChildFlags_Borders);
+            ImVec2(pw, ph), ImGuiChildFlags_Borders);
         renderSinglePanel(i);
         ImGui::EndChild();
 
@@ -371,7 +377,7 @@ void Application::renderSinglePanel(int index) {
     if (bold) ImGui::PopFont();
 
     if (state_.panels.size() > 1) {
-        ImGui::SameLine(kPanelWidth - 48);
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 16);
         ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
@@ -552,22 +558,24 @@ void Application::renderSinglePanel(int index) {
 // ── New Purchase Placeholder Card ────────────────────────────────────────────
 
 void Application::renderNewPurchaseCard() {
+    float pw = panelWidth(state_.fontSize);
+    float ph = panelMinHeight(state_.fontSize);
+
     ImVec2 startPos = ImGui::GetCursorScreenPos();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, kCardRadius);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
 
-    ImGui::BeginChild("##NewPurchaseCard", ImVec2(kPanelWidth, kPanelMinHeight), ImGuiChildFlags_None);
+    ImGui::BeginChild("##NewPurchaseCard", ImVec2(pw, ph), ImGuiChildFlags_None);
 
     bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
     ImU32 borderColor = hovered ? theme::kAccentBlue : theme::kBorder;
     ImU32 textColor = hovered ? theme::kAccentBlue : theme::kTextMuted;
 
-    // Draw dashed border
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 min = startPos;
-    ImVec2 max = ImVec2(min.x + kPanelWidth, min.y + kPanelMinHeight);
+    ImVec2 max = ImVec2(min.x + pw, min.y + ph);
 
     float dashLen = 8.0f;
     float gapLen = 6.0f;
@@ -591,8 +599,7 @@ void Application::renderNewPurchaseCard() {
     drawDashedLine(max.x - r, max.y, min.x + r, max.y);
     drawDashedLine(min.x, max.y - r, min.x, min.y + r);
 
-    // Center content
-    float centerY = kPanelMinHeight * 0.4f;
+    float centerY = ph * 0.4f;
     ImGui::SetCursorPosY(centerY);
 
     ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(textColor));
@@ -600,7 +607,7 @@ void Application::renderNewPurchaseCard() {
     if (bold) ImGui::PushFont(bold);
 
     float plusWidth = ImGui::CalcTextSize("+").x;
-    ImGui::SetCursorPosX((kPanelWidth - plusWidth) * 0.5f - 16);
+    ImGui::SetCursorPosX((pw - plusWidth) * 0.5f - 16);
     ImGui::SetWindowFontScale(2.0f);
     ImGui::TextUnformatted("+");
     ImGui::SetWindowFontScale(1.0f);
@@ -611,7 +618,7 @@ void Application::renderNewPurchaseCard() {
     helpers::textCentered("New Purchase");
     ImGui::PopStyleColor();
 
-    if (ImGui::InvisibleButton("##addPanel", ImVec2(kPanelWidth - 32, kPanelMinHeight * 0.3f))) {
+    if (ImGui::InvisibleButton("##addPanel", ImVec2(pw - 32, ph * 0.3f))) {
         addPanel();
     }
 
