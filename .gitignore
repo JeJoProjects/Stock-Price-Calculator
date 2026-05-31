@@ -46,6 +46,9 @@ dist/
 *.suo
 *.user
 
+# === App ===
+stockcalc_settings.json
+
 # === OS ===
 Thumbs.db
 .DS_Store

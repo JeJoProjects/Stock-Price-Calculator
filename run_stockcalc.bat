@@ -1,18 +1,21 @@
 @echo off
 cd /d "%~dp0"
 
-:: Try miniconda first, then conda python, then PATH python
-if exist "C:\ProgramData\miniconda3\python.exe" (
-    "C:\ProgramData\miniconda3\python.exe" -m py_app.main
-) else if exist "%USERPROFILE%\miniconda3\python.exe" (
-    "%USERPROFILE%\miniconda3\python.exe" -m py_app.main
-) else (
-    python -m py_app.main
+:: Build if exe doesn't exist
+if not exist "build\StockPriceCalculator.exe" (
+    echo Building StockPriceCalculator...
+    if not exist "build" mkdir build
+    cd build
+    cmake .. -G "MinGW Makefiles" >nul 2>&1
+    cmake --build . >nul 2>&1
+    cd ..
+    if not exist "build\StockPriceCalculator.exe" (
+        echo.
+        echo ERROR: Build failed. Make sure CMake and MinGW g++ are installed.
+        echo Required: CMake 3.20+, MinGW g++ 12+
+        pause
+        exit /b 1
+    )
 )
 
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo ERROR: Python not found or app failed to start.
-    echo Install Python 3.10+ and PySide6, or set PYTHON_PATH.
-    pause
-)
+start "" "build\StockPriceCalculator.exe"

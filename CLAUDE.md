@@ -1,100 +1,101 @@
-# CLAUDE.md — StockPriceCalculator Project Overview
+# CLAUDE.md — StockPriceCalculator
 
 ## What This Project Does
 
-**StockPriceCalculator** is a stock investment profit calculator with two frontends:
-
-1. **Legacy Win32 GUI** — original native Windows app (C++23, no dependencies)
-2. **New PySide6 GUI** — TradingView-themed modern desktop app (Python + C++23 DLL backend)
+**StockPriceCalculator** is a GPU-rendered stock investment profit calculator built
+entirely in **C++23** with Dear ImGui, GLFW, and OpenGL3. TradingView-inspired dark theme.
 
 > *"If I buy X shares at price Y and the price reaches Z, how much profit do I make?"*
 
-Supports **multiple purchases** side-by-side, combined statistics, and US stock symbol search.
+Supports **multiple purchases** side-by-side, combined statistics, smart field inference,
+US stock symbol search with instant autocomplete, and persistent settings.
 
 ---
 
 ## How to Build & Run
 
-### New Python GUI (TradingView theme)
+### Quick Start
 ```bat
-run_stockcalc.bat                     :: Launch the PySide6 app
-python -m py_app.main                 :: Or run directly
-python -m pytest py_app/tests/ -v     :: Run unit tests (25 tests)
+run_stockcalc.bat                   :: Builds (if needed) and launches the app
 ```
 
-### C++23 Backend DLL
+### Manual Build (MinGW)
 ```bat
-cd py_app\backend\build
+cd build
 cmake .. -G "MinGW Makefiles"
 cmake --build .
-test_calc_engine.exe                  :: Run C++ unit tests (33 tests)
+build\StockPriceCalculator.exe
 ```
-Output: `py_app/backend/build/libstockcalc_engine.dll`
 
-Requirements: **Python 3.10+**, **PySide6**, **CMake >= 3.20**, **MinGW g++ 12+** (or MSVC)
+### Unit Tests
+```bat
+build\test_calc_engine.exe          :: 34 C++ unit tests
+```
+
+### Requirements
+- **CMake >= 3.20**
+- **MinGW g++ 12+** (C++23 support required)
+- **Dear ImGui v1.92.9** at `D:\C++\External Libraries\IMGUI\`
+- **GLFW 3.4 (64-bit)** at `D:\C++\External Libraries\glfw-3.4.bin.WIN64\`
 
 ---
 
-## Architecture (New GUI)
+## Architecture
 
-**Hybrid C++23 backend + Python GUI:**
+**Single C++23 executable** — no Python, no DLL, no external runtime.
 
 ```
-Python (PySide6 GUI)
-    └── ctypes bridge ──→ C++23 DLL (stockcalc_engine)
-         └── Pure calculation logic (no UI, no Win32)
-    └── Stock search (HTTP API / offline JSON)
+ImGui (GPU rendering) ← GLFW window ← OpenGL3 context
+        ↓
+   Application (orchestrator)
+   ├── TopBar ("↗ StockCalc" title)
+   ├── MainMenuBar (File/Edit/View/Help + shortcuts)
+   ├── SearchBar + StockSearchEngine (instant autocomplete)
+   ├── PurchasePanel × N (calculator cards, 280px, rounded)
+   ├── NewPurchaseCard (dashed placeholder with hover)
+   ├── CombinedStatsBar (stats + Reset All button)
+   ├── PreferencesDialog (font size, display toggles)
+   └── SettingsManager (JSON persistence)
 ```
-
-- C++23 DLL handles: profit calculation, smart field inference, combined stats
-- Python handles: GUI rendering, stock symbol search, theme, user interaction
-- Falls back to pure Python if DLL is not built
 
 ### Key Files
 
 ```
-py_app/
-├── main.py                        Entry point
-├── config.py                      Colors, fonts, API config, constants
+src/
+├── main.cpp                         GLFW/OpenGL3 init, main loop, settings load/save
+├── app/
+│   ├── application.hpp/.cpp         Top-level orchestrator, all UI rendering
+│   └── appState.hpp                 Central mutable state struct
 ├── core/
-│   ├── bridge.py                  ctypes wrapper for C++ DLL (with Python fallback)
-│   └── stock_search.py            3-tier stock search: Polygon → AlphaVantage → offline
-├── widgets/
-│   ├── top_bar.py                 App title bar
-│   ├── search_bar.py              Search input with debounce
-│   ├── autocomplete_list.py       Floating dropdown with keyboard nav
-│   ├── purchase_panel.py          Single calculator card
-│   └── combined_stats.py          Bottom aggregated stats bar
-├── windows/
-│   └── main_window.py             Main window orchestrator
-├── theme/
-│   └── dark.qss                   TradingView dark theme (QSS stylesheet)
-├── data/
-│   └── us_tickers.json            Bundled 100 US stock symbols for offline search
-├── backend/
-│   ├── include/calc_engine.hpp    C++23 calculation engine header
-│   ├── src/calc_engine.cpp        Calculation logic implementation
-│   ├── src/exports.cpp            extern "C" DLL exports for ctypes
-│   ├── CMakeLists.txt             Build config for shared library
-│   └── tests/test_calc.cpp        C++ unit tests (33 assertions)
-├── tests/
-│   ├── test_calc_engine.py        Python calc engine tests (17 tests)
-│   └── test_stock_search.py       Stock search tests (8 tests)
-└── requirements.txt               PySide6, requests, pytest, pytest-qt
+│   ├── calcEngine.hpp/.cpp          Profit calculation, smart field inference, combined stats
+│   └── panelState.hpp               Per-panel state with field tracking + std::from_chars
+├── search/
+│   ├── tickerData.hpp/.cpp          JSON loader + TickerEntry struct (sorted by symbol)
+│   └── stockSearchEngine.hpp/.cpp   Prefix + substring search (lower_bound + linear scan)
+├── ui/
+│   ├── theme.hpp/.cpp               TradingView colors (ImU32), font loading (Segoe UI, Consolas)
+│   └── imguiHelpers.hpp             Comma formatting, currency/profit/percent, centering, colors
+├── config/
+│   └── settingsManager.hpp/.cpp     Load/save JSON preferences (font, window pos/size)
+tests/
+└── testCalcEngine.cpp               34 unit tests for calc engine + field tracking
+data/
+└── us_tickers_full.json             100 US stock tickers for offline search
+CMakeLists.txt                       Build config linking ImGui, GLFW, OpenGL
+run_stockcalc.bat                    Auto-build + launch script
 ```
 
 ---
 
 ## Smart Field Inference
 
-When only **two of the three** primary fields are filled in, the third is
-auto-calculated:
+When only **two of the three** primary fields are filled, the third is auto-calculated
+and its value is **written back into the input field** with dimmed styling and a blue
+border accent. Tracks `lastChanged` and `secondLastChanged` to resolve ambiguity.
 
 - `totalInvestment` + `sharePrice` → computes `totalShares`
 - `totalInvestment` + `totalShares` → computes `sharePrice`
 - `sharePrice` + `totalShares` → computes `totalInvestment`
-
-Tracks `lastChangedField` and `secondLastChangedField` to resolve ambiguity.
 
 ---
 
@@ -102,26 +103,55 @@ Tracks `lastChangedField` and `secondLastChangedField` to resolve ambiguity.
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| bg_primary | #131722 | Main background |
-| bg_secondary | #1e222d | Cards, bars |
-| bg_input | #2a2e39 | Input fields |
-| accent_blue | #2962ff | Focus, selection |
-| profit_green | #089981 | Positive values |
-| loss_red | #f23645 | Negative values |
+| kBgPrimary | #131722 | Main background |
+| kBgSecondary | #1e222d | Cards, top bar, stats bar |
+| kBgInput | #2a2e39 | Input fields |
+| kAccentBlue | #2962ff | Focus, selection, inferred fields |
+| kProfitGreen | #089981 | Positive profit values (+$1,234.56) |
+| kLossRed | #f23645 | Negative profit values (-$1,234.56), Reset All button |
+
+**Fonts:** Segoe UI (default 15px), Consolas (monospace for numbers), Segoe UI Bold (titles).
+
+**Number formatting:** Locale-aware commas ($1,234.56), +/- profit prefix, em-dash for zero.
 
 ---
 
-## Stock Search (3-tier fallback)
+## Stock Search
 
-1. **Polygon.io API** — primary (set `POLYGON_API_KEY` env var)
-2. **Alpha Vantage API** — secondary (set `ALPHA_VANTAGE_KEY` env var)
-3. **Offline JSON** — bundled `us_tickers.json` (always works)
+- Bundled `us_tickers_full.json` with 100 major US stock symbols
+- Pre-sorted by lowercase symbol at startup
+- Prefix match via `std::ranges::lower_bound` + substring scan
+- Scoring: prefix(100) > symbol-substring(50) > name-substring(25)
+- Instant results from first keystroke, no debounce
+- Keyboard (↑↓ + Enter + Esc) and mouse click navigation
+- Exchange badges (NASDAQ/NYSE/AMEX) in dropdown
 
 ---
 
-## Legacy
+## Keyboard Shortcuts
 
-The original Win32 C++ frontend (`main.cc`, `Util.hpp`, `ProfitCalculator.hpp`,
-`MultiCalculatorManager.hpp`, root `CMakeLists.txt`) was removed after all
-calculation logic was extracted into `py_app/backend/` as a standalone C++23 DLL.
-The new PySide6 GUI replaces the Win32 interface entirely.
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+N | New purchase panel |
+| Ctrl+R | Reset all panels |
+| Ctrl+Q | Quit |
+| Ctrl+, | Preferences |
+| Ctrl+F | Focus search bar |
+
+---
+
+## Settings Persistence
+
+Saved to `stockcalc_settings.json` on exit:
+- Font size (10–24px), max search results
+- Show exchange badges, show stats bar
+- Window position and size
+
+---
+
+## C++23 Features Used
+
+- `std::ranges` (sorting, searching), `std::span` (combined stats)
+- `std::from_chars` (fast number parsing), `std::string_view`
+- Structured bindings, designated initializers, `constexpr`, `[[nodiscard]]`
+- Note: `std::format` unavailable on GCC 12.2 — uses `std::snprintf`

@@ -1,8 +1,7 @@
 # StockCalc - Stock Profit Calculator
 
-A TradingView-themed desktop app for calculating stock investment profit with US stock symbol search.
-
-**Architecture:** C++23 backend (calculation engine DLL) + Python/PySide6 frontend (GUI)
+A GPU-rendered, TradingView-themed desktop app for calculating stock investment profit.
+Built entirely in **C++23** with Dear ImGui + GLFW + OpenGL3.
 
 ---
 
@@ -10,48 +9,43 @@ A TradingView-themed desktop app for calculating stock investment profit with US
 
 ### Prerequisites
 
-- **Python 3.10+** with pip
-- **CMake 3.20+** and a C++23 compiler (MinGW g++ 12+ or MSVC) — only needed for native backend
+- **CMake 3.20+**
+- **MinGW g++ 12+** (C++23 support)
 - **Windows 10/11**
 
-### Install & Run
+### Build & Run
 
-```bash
-# 1. Install Python dependencies
-pip install PySide6 requests
-
-# 2. Launch the app
-python -m py_app.main
+```bat
+run_stockcalc.bat
 ```
 
-Or double-click **`run_stockcalc.bat`** from File Explorer.
+Or build manually:
 
-### Build the C++ Backend (Optional)
-
-The app works without the C++ DLL (falls back to pure Python). To enable the native engine:
-
-```bash
-cd py_app/backend
-mkdir build && cd build
-cmake .. -G "MinGW Makefiles"    # or "Visual Studio 17 2022"
+```bat
+cd build
+cmake .. -G "MinGW Makefiles"
 cmake --build .
+StockPriceCalculator.exe
 ```
-
-This produces `libstockcalc_engine.dll` which the app auto-detects on next launch.
 
 ---
 
 ## Features
 
-- **TradingView dark theme** - professional trading-style UI with the exact TradingView color palette
-- **US stock symbol search** - type a ticker or company name, results appear as you type
+- **TradingView dark theme** - exact color palette (#131722 bg, #089981 green, #f23645 red)
+- **GPU-rendered UI** - Dear ImGui with OpenGL3, smooth 60fps
+- **US stock symbol search** - instant autocomplete from first keystroke
   - Keyboard navigation: Arrow keys, Enter to select, Esc to close
-  - Mouse click selection
-  - 3-tier search: Polygon.io API -> Alpha Vantage API -> bundled offline JSON (100 stocks)
-- **Multi-panel purchases** - add multiple buy positions side by side
+  - Exchange badges (NASDAQ, NYSE, AMEX)
+  - 100 bundled US stock symbols
+- **Multi-panel purchases** - add multiple positions side by side
 - **Smart field inference** - fill any 2 of Investment/Price/Shares, the 3rd auto-calculates
-- **Profit/Loss coloring** - green for gains, red for losses, matching TradingView style
-- **Combined statistics** - weighted average price, total investment, total profit across all panels
+  - Inferred values written back into fields with blue accent styling
+- **Profit/Loss display** - green (+$1,234.56) for gains, red (-$1,234.56) for losses
+- **Combined statistics** - weighted avg price, total investment, total profit
+- **Settings persistence** - font size, window position, preferences saved between sessions
+- **Keyboard shortcuts** - Ctrl+N (new panel), Ctrl+R (reset), Ctrl+Q (quit), Ctrl+F (search), Ctrl+, (preferences)
+- **Menus** - File, Edit, View, Help with full shortcut hints
 
 ---
 
@@ -62,32 +56,14 @@ This produces `libstockcalc_engine.dll` which the app auto-detects on next launc
 3. **Set target price** - Enter the price you expect the stock to reach
 4. **Read your results** - Return, Profit, and Gain % update instantly
 5. **Add more purchases** - Click the "+" card to add another position
-6. **Combined stats** - The bottom bar shows totals across all your positions
-
----
-
-## API Setup (Optional)
-
-For live stock search, set these environment variables:
-
-```bash
-set POLYGON_API_KEY=your_key_here        # Free at polygon.io (5 req/min)
-set ALPHA_VANTAGE_KEY=your_key_here      # Free at alphavantage.co
-```
-
-Without API keys, search uses the bundled offline list of 100 popular US stocks.
+6. **Combined stats** - The bottom bar shows totals across all positions
 
 ---
 
 ## Running Tests
 
-```bash
-# Python tests (25 tests)
-python -m pytest py_app/tests/ -v
-
-# C++ tests (33 tests) — requires building the backend first
-cd py_app/backend/build
-./test_calc_engine.exe
+```bat
+build\test_calc_engine.exe          :: 34 C++ unit tests
 ```
 
 ---
@@ -95,32 +71,28 @@ cd py_app/backend/build
 ## Project Structure
 
 ```
-py_app/
-  main.py                  Entry point
-  config.py                Colors, fonts, API config
+src/
+  main.cpp                    GLFW/OpenGL3 init, main loop
+  app/
+    application.hpp/.cpp      UI orchestrator (all rendering)
+    appState.hpp              Central mutable state
   core/
-    bridge.py              ctypes wrapper for C++ DLL (with Python fallback)
-    stock_search.py        Stock symbol search (API + offline)
-  widgets/
-    top_bar.py             App title bar
-    search_bar.py          Search input with debounce
-    autocomplete_list.py   Floating dropdown with keyboard nav
-    purchase_panel.py      Calculator card widget
-    combined_stats.py      Bottom stats bar
-  windows/
-    main_window.py         Main window orchestrator
-  theme/
-    dark.qss               TradingView dark theme stylesheet
-  backend/
-    include/               C++23 headers
-    src/                   C++23 implementation + DLL exports
-    tests/                 C++ unit tests
-    CMakeLists.txt         Build config
-  data/
-    us_tickers.json        Bundled US stock symbols
-  tests/
-    test_calc_engine.py    Calculation engine tests
-    test_stock_search.py   Stock search tests
+    calcEngine.hpp/.cpp       Profit calculation + smart inference
+    panelState.hpp            Per-panel state with field tracking
+  search/
+    tickerData.hpp/.cpp       JSON loader for stock tickers
+    stockSearchEngine.hpp/.cpp  Prefix + substring search engine
+  ui/
+    theme.hpp/.cpp            TradingView colors + font loading
+    imguiHelpers.hpp          Number formatting, layout utilities
+  config/
+    settingsManager.hpp/.cpp  JSON preferences persistence
+tests/
+  testCalcEngine.cpp          34 unit tests
+data/
+  us_tickers_full.json        100 US stock symbols
+CMakeLists.txt                Build config
+run_stockcalc.bat             Auto-build + launch
 ```
 
 ---
