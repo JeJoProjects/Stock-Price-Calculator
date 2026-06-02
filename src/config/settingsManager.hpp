@@ -3,12 +3,12 @@
 #include <string>
 
 struct AppSettings {
-    float fontSize = 15.0f;
+    float fontSize = 28.0f;
     int maxSearchResults = 12;
     bool showExchangeBadges = true;
     bool showStatsBar = true;
-    int windowWidth = 1280;
-    int windowHeight = 720;
+    int windowWidth = 1600;
+    int windowHeight = 900;
     int windowX = -1;
     int windowY = -1;
 };

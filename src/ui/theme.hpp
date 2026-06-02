@@ -22,5 +22,6 @@ void loadFonts(float fontSize);
 ImFont* getDefaultFont();
 ImFont* getMonoFont();
 ImFont* getBoldFont();
+ImFont* getStatsFont();
 
 } // namespace theme

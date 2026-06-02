@@ -4,6 +4,9 @@
 static ImFont* sDefaultFont = nullptr;
 static ImFont* sMonoFont = nullptr;
 static ImFont* sBoldFont = nullptr;
+static ImFont* sStatsFont = nullptr;
+
+static constexpr float kStatsFontSize = 34.0f;
 
 namespace theme {
 
@@ -33,10 +36,22 @@ void loadFonts(float fontSize) {
         sBoldFont = sDefaultFont;
     }
 
+    // Stats bar font — always 34px for high visibility
+    ImFontConfig statsCfg{};
+    statsCfg.OversampleH = 2;
+    statsCfg.OversampleV = 1;
+    sStatsFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consolab.ttf", kStatsFontSize, &statsCfg);
+    if (!sStatsFont) {
+        sStatsFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", kStatsFontSize, &statsCfg);
+    }
+    if (!sStatsFont) {
+        sStatsFont = sMonoFont;
+    }
+
     io.Fonts->Build();
 }
 
-void applyTradingViewTheme(float /*fontSize*/) {
+void applyTradingViewTheme(float fontSize) {
     auto& style = ImGui::GetStyle();
     auto* colors = style.Colors;
 
@@ -91,26 +106,30 @@ void applyTradingViewTheme(float /*fontSize*/) {
 
     colors[ImGuiCol_NavHighlight]       = v4(kAccentBlue);
 
+    // Scale spacing/padding with font size
+    float scale = fontSize / 28.0f;
+
     style.WindowRounding    = 0.0f;
-    style.ChildRounding     = 12.0f;
-    style.FrameRounding     = 6.0f;
-    style.GrabRounding      = 4.0f;
-    style.PopupRounding     = 8.0f;
-    style.ScrollbarRounding = 4.0f;
-    style.TabRounding       = 4.0f;
+    style.ChildRounding     = 12.0f * scale;
+    style.FrameRounding     = 6.0f * scale;
+    style.GrabRounding      = 4.0f * scale;
+    style.PopupRounding     = 8.0f * scale;
+    style.ScrollbarRounding = 4.0f * scale;
+    style.TabRounding       = 4.0f * scale;
 
     style.WindowBorderSize  = 0.0f;
     style.ChildBorderSize   = 1.0f;
     style.FrameBorderSize   = 0.0f;
-    style.FramePadding      = ImVec2(8.0f, 6.0f);
-    style.ItemSpacing       = ImVec2(8.0f, 6.0f);
-    style.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
-    style.ScrollbarSize     = 8.0f;
-    style.GrabMinSize       = 8.0f;
+    style.FramePadding      = ImVec2(10.0f * scale, 8.0f * scale);
+    style.ItemSpacing       = ImVec2(10.0f * scale, 8.0f * scale);
+    style.ItemInnerSpacing  = ImVec2(8.0f * scale, 6.0f * scale);
+    style.ScrollbarSize     = 10.0f * scale;
+    style.GrabMinSize       = 10.0f * scale;
 }
 
 ImFont* getDefaultFont() { return sDefaultFont; }
 ImFont* getMonoFont()    { return sMonoFont; }
 ImFont* getBoldFont()    { return sBoldFont; }
+ImFont* getStatsFont()   { return sStatsFont; }
 
 } // namespace theme
