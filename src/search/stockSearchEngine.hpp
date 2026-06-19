@@ -3,15 +3,28 @@
 #include "search/tickerData.hpp"
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 
 namespace search {
 
+enum class MatchKind {
+    exactSymbol,
+    prefixSymbol,
+    symbolSubstring,
+    prefixName,
+    nameSubstring,
+    online
+};
+
 struct SearchResult {
     const TickerEntry* entry = nullptr;
     int score = 0;
+    MatchKind kind = MatchKind::nameSubstring;
+    std::string preview;
 };
 
 struct OnlineResult {
@@ -38,16 +51,27 @@ public:
 private:
     std::vector<TickerEntry> tickers_;
     std::string pythonPath_;
+    mutable std::unordered_map<std::string, std::vector<SearchResult>> queryCache_;
+    mutable std::unordered_map<std::string, std::vector<OnlineResult>> onlineCache_;
 
-    std::thread onlineThread_;
+    std::thread onlineWorker_;
     mutable std::mutex mutex_;
+    std::condition_variable cv_;
     std::vector<OnlineResult> onlineResults_;
     std::atomic<bool> onlineReady_{false};
     std::atomic<bool> onlineBusy_{false};
     std::atomic<unsigned> requestId_{0};
+    std::string pendingQuery_;
+    int pendingMaxResults_ = 12;
+    bool hasPendingRequest_ = false;
+    bool stopWorker_ = false;
 
     void findPython();
+    void startWorker();
+    void workerLoop();
     void runOnlineSearch(std::string query, int maxResults, unsigned reqId);
+    [[nodiscard]] static std::string normalizeQuery(const std::string& query);
+    [[nodiscard]] static const char* kindPreview(MatchKind kind);
 };
 
 } // namespace search

@@ -102,6 +102,7 @@ void Application::update() {
     if (state_.showAbout) renderAboutDialog();
 
     // Poll for async online search results
+    dispatchPendingOnlineSearch();
     if (searchEngine_.hasOnlineResults() && state_.searchDropdownOpen) {
         mergeOnlineResults();
     }
@@ -125,10 +126,29 @@ void Application::renderMainWindow() {
 // ── Top Bar ──────────────────────────────────────────────────────────────────
 
 void Application::renderTopBar() {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgSecondary));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::BeginChild("##TopBar", ImVec2(0, kTopBarHeight), ImGuiChildFlags_None);
 
-    ImGui::SetCursorPos(ImVec2(24.0f, (kTopBarHeight - ImGui::GetTextLineHeight()) * 0.5f));
+    ImVec2 barPos = ImGui::GetCursorScreenPos();
+    ImVec2 barSize = ImGui::GetContentRegionAvail();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilledMultiColor(
+        barPos,
+        ImVec2(barPos.x + barSize.x, barPos.y + barSize.y),
+        IM_COL32(0x1A, 0x1E, 0x28, 0xFF),
+        IM_COL32(0x1A, 0x1E, 0x28, 0xFF),
+        IM_COL32(0x13, 0x17, 0x22, 0xFF),
+        IM_COL32(0x13, 0x17, 0x22, 0xFF));
+    dl->AddRectFilled(
+        barPos,
+        ImVec2(barPos.x + barSize.x, barPos.y + 3.0f),
+        helpers::withAlpha(theme::kAccentBlue, 0.18f));
+    dl->AddLine(
+        ImVec2(barPos.x, barPos.y + barSize.y - 1.0f),
+        ImVec2(barPos.x + barSize.x, barPos.y + barSize.y - 1.0f),
+        theme::kBorder, 1.0f);
+
+    ImGui::SetCursorPos(ImVec2(24.0f, 5.0f));
 
     ImFont* bold = theme::getBoldFont();
     if (bold) ImGui::PushFont(bold);
@@ -137,13 +157,21 @@ void Application::renderTopBar() {
     ImGui::PopStyleColor();
     if (bold) ImGui::PopFont();
 
-    ImGui::EndChild();
+    ImGui::SetCursorPos(ImVec2(24.0f, 23.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextUnformatted("Realtime stock symbol search and profit planning");
     ImGui::PopStyleColor();
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 p = ImGui::GetCursorScreenPos();
-    dl->AddLine(ImVec2(p.x, p.y - 1), ImVec2(p.x + ImGui::GetWindowWidth(), p.y - 1),
-        theme::kBorder, 1.0f);
+    char statusBuf[64];
+    std::snprintf(statusBuf, sizeof(statusBuf), "%zu symbols loaded", searchEngine_.tickerCount());
+    ImVec2 statusSize = ImGui::CalcTextSize(statusBuf);
+    ImGui::SetCursorPos(ImVec2(std::max(24.0f, barSize.x - statusSize.x - 24.0f), 16.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextUnformatted(statusBuf);
+    ImGui::PopStyleColor();
+
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
 }
 
 // ── Menu Bar ─────────────────────────────────────────────────────────────────
@@ -212,6 +240,7 @@ void Application::renderSearchBar() {
             state_.searchDropdownOpen = false;
             state_.searchResults.clear();
             state_.searchFocusRequested = true;
+            hasPendingOnlineRequest_ = false;
         }
         ImGui::PopStyleColor(4);
     }
@@ -225,19 +254,20 @@ void Application::renderSearchBar() {
         auto offline = searchEngine_.search(state_.searchQuery, state_.maxSearchResults);
         for (const auto& r : offline) {
             state_.searchResults.push_back({
-                r.entry->symbol, r.entry->name, r.entry->exchange, r.score
+                r.entry->symbol, r.entry->name, r.entry->exchange, r.preview, r.score
             });
         }
         state_.searchDropdownOpen = true;
         state_.searchSelectedIndex = 0;
 
-        // Async: fire online search in background thread (merges when ready)
-        if (state_.searchQuery.size() >= 2) {
-            searchEngine_.requestOnline(state_.searchQuery, state_.maxSearchResults);
-        }
+        // Debounced async search so typing stays responsive while online results catch up.
+        pendingOnlineQuery_ = state_.searchQuery;
+        pendingOnlineRequestAt_ = ImGui::GetTime();
+        hasPendingOnlineRequest_ = state_.searchQuery.size() >= 2;
     } else if (state_.searchQuery.empty()) {
         state_.searchDropdownOpen = false;
         state_.searchResults.clear();
+        hasPendingOnlineRequest_ = false;
     }
 
     if (focused && state_.searchDropdownOpen) {
@@ -253,7 +283,7 @@ void Application::renderSearchBar() {
             && state_.searchSelectedIndex < static_cast<int>(state_.searchResults.size())) {
             auto& sel = state_.searchResults[state_.searchSelectedIndex];
             search::TickerEntry entry{sel.symbol, sel.name, sel.exchange, {}, {}};
-            applySearchResult(entry);
+            applySearchResult(entry, sel.preview);
             state_.searchQuery.clear();
             state_.searchDropdownOpen = false;
             state_.searchResults.clear();
@@ -271,6 +301,7 @@ void Application::renderSearchDropdown() {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgSecondary));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
 
     float itemHeight = ImGui::GetTextLineHeightWithSpacing() + 8.0f;
     float footerHeight = ImGui::GetTextLineHeightWithSpacing() + 8.0f;
@@ -280,22 +311,33 @@ void Application::renderSearchDropdown() {
 
     ImGui::SetCursorPosX(24.0f);
     ImGui::BeginChild("##SearchDropdown", ImVec2(-24, dropdownHeight), ImGuiChildFlags_Borders);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 dropdownPos = ImGui::GetCursorScreenPos();
+    ImVec2 dropdownSize = ImGui::GetContentRegionAvail();
+    dl->AddRectFilled(
+        ImVec2(dropdownPos.x + 4.0f, dropdownPos.y + 4.0f),
+        ImVec2(dropdownPos.x + dropdownSize.x + 4.0f, dropdownPos.y + dropdownSize.y + 6.0f),
+        IM_COL32(0, 0, 0, 90), 8.0f);
 
     for (int i = 0; i < static_cast<int>(state_.searchResults.size()); ++i) {
         const auto& r = state_.searchResults[i];
         bool selected = (i == state_.searchSelectedIndex);
+        ImVec2 rowStart = ImGui::GetCursorScreenPos();
+        float rowWidth = ImGui::GetContentRegionAvail().x;
 
-        if (selected) {
-            ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::PushID(i);
+        bool activated = ImGui::InvisibleButton("##SearchRow", ImVec2(rowWidth, itemHeight));
+        bool hovered = ImGui::IsItemHovered();
+
+        if (selected || hovered) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->AddRectFilled(p, ImVec2(p.x + ImGui::GetContentRegionAvail().x, p.y + itemHeight),
-                helpers::withAlpha(theme::kAccentBlue, 0.12f));
-            dl->AddRectFilled(p, ImVec2(p.x + 3, p.y + itemHeight),
+            dl->AddRectFilled(rowStart, ImVec2(rowStart.x + rowWidth, rowStart.y + itemHeight),
+                helpers::withAlpha(theme::kAccentBlue, selected ? 0.16f : 0.08f));
+            dl->AddRectFilled(rowStart, ImVec2(rowStart.x + 3, rowStart.y + itemHeight),
                 theme::kAccentBlue);
         }
 
-        ImGui::PushID(i);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 12.0f);
+        ImGui::SetCursorScreenPos(ImVec2(rowStart.x + 12.0f, rowStart.y + 4.0f));
 
         ImFont* mono = theme::getMonoFont();
         if (mono) ImGui::PushFont(mono);
@@ -322,21 +364,19 @@ void Application::renderSearchDropdown() {
             ImGui::PopStyleColor();
         }
 
-        ImVec2 cursorAfterRow = ImGui::GetCursorPos();
-        float padY = itemHeight - (cursorAfterRow.y - (ImGui::GetCursorStartPos().y + i * itemHeight));
-        if (padY > 0) ImGui::SetCursorPosY(cursorAfterRow.y + padY * 0.5f);
+        ImGui::SetCursorScreenPos(ImVec2(rowStart.x + 104.0f, rowStart.y + 18.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        ImGui::TextUnformatted(r.preview.c_str());
+        ImGui::PopStyleColor();
 
-        if (ImGui::InvisibleButton("##sel", ImVec2(-1, 1))) {
+        ImGui::SetCursorScreenPos(ImVec2(rowStart.x, rowStart.y + itemHeight));
+
+        if (activated) {
             search::TickerEntry entry{r.symbol, r.name, r.exchange, {}, {}};
-            applySearchResult(entry);
+            applySearchResult(entry, r.preview);
             state_.searchQuery.clear();
             state_.searchDropdownOpen = false;
             state_.searchResults.clear();
-            ImGui::PopID();
-            ImGui::EndChild();
-            ImGui::PopStyleVar(2);
-            ImGui::PopStyleColor();
-            return;
         }
 
         ImGui::PopID();
@@ -348,7 +388,7 @@ void Application::renderSearchDropdown() {
     ImGui::PopStyleColor();
 
     ImGui::EndChild();
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
 }
 
@@ -438,6 +478,13 @@ void Application::renderSinglePanel(int index) {
             ImGui::TextUnformatted(panel.companyName.c_str());
             ImGui::PopStyleColor();
         }
+
+        if (!panel.matchPreview.empty()) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+            ImGui::TextUnformatted(panel.matchPreview.c_str());
+            ImGui::PopStyleColor();
+        }
     }
 
     ImGui::Spacing();
@@ -518,6 +565,39 @@ void Application::renderSinglePanel(int index) {
         const auto& res = state_.results[index];
 
         ImFont* mono = theme::getMonoFont();
+
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgInput));
+        ImGui::BeginChild("##ResultSummary", ImVec2(0, 54), ImGuiChildFlags_Borders);
+        ImDrawList* summaryDl = ImGui::GetWindowDrawList();
+        ImVec2 summaryPos = ImGui::GetCursorScreenPos();
+        summaryDl->AddRectFilled(summaryPos,
+            ImVec2(summaryPos.x + ImGui::GetContentRegionAvail().x, summaryPos.y + 4.0f),
+            helpers::withAlpha(theme::kAccentBlue, 0.18f));
+
+        auto summaryChip = [&](float x, const char* label, const std::string& value, ImU32 valueColor) {
+            ImGui::SetCursorPosX(x);
+            ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+            ImGui::TextUnformatted(label);
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            if (mono) ImGui::PushFont(mono);
+            ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(valueColor));
+            ImGui::TextUnformatted(value.c_str());
+            ImGui::PopStyleColor();
+            if (mono) ImGui::PopFont();
+        };
+
+        float profitColorValue = (std::fabs(res.profit) < 0.005) ? theme::kTextMuted
+            : (res.profit > 0.0 ? theme::kProfitGreen : theme::kLossRed);
+        summaryChip(12.0f, "Profit", helpers::formatProfit(res.profit), profitColorValue);
+        ImGui::SameLine(0, 18);
+        summaryChip(0.0f, "Gain", helpers::formatGain(res.gainPercent), profitColorValue);
+        ImGui::SameLine(0, 18);
+        summaryChip(0.0f, "Shares", helpers::formatNumber(res.totalShares, 3), theme::kTextPrimary);
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
 
         auto outputRow = [mono](const char* lbl, const std::string& val, ImU32 color = 0) {
             ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
@@ -666,13 +746,24 @@ void Application::renderNewPurchaseCard() {
 void Application::renderCombinedStatsBar() {
     const auto& c = state_.combined;
 
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgSecondary));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::BeginChild("##StatsBar", ImVec2(0, kStatsBarHeight), ImGuiChildFlags_None);
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 p = ImGui::GetCursorScreenPos();
-    dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x + ImGui::GetWindowWidth(), p.y),
-        theme::kBorder, 1.0f);
+    ImVec2 sz = ImGui::GetContentRegionAvail();
+    dl->AddRectFilledMultiColor(
+        p,
+        ImVec2(p.x + sz.x, p.y + sz.y),
+        IM_COL32(0x1D, 0x21, 0x2B, 0xFF),
+        IM_COL32(0x1D, 0x21, 0x2B, 0xFF),
+        IM_COL32(0x18, 0x1C, 0x25, 0xFF),
+        IM_COL32(0x18, 0x1C, 0x25, 0xFF));
+    dl->AddRectFilled(
+        p,
+        ImVec2(p.x + sz.x, p.y + 3.0f),
+        helpers::withAlpha(theme::kAccentBlue, 0.14f));
+    dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x + sz.x, p.y), theme::kBorder, 1.0f);
 
     ImGui::SetCursorPos(ImVec2(24, 8));
 
@@ -860,12 +951,13 @@ void Application::handleShortcuts() {
     }
 }
 
-void Application::applySearchResult(const search::TickerEntry& entry) {
+void Application::applySearchResult(const search::TickerEntry& entry, const std::string& preview) {
     if (state_.panels.empty()) addPanel();
     auto& panel = state_.panels.back();
     panel.tickerSymbol = entry.symbol;
     panel.companyName = entry.name;
     panel.exchange = entry.exchange;
+    panel.matchPreview = preview.empty() ? std::string("Selected from search") : preview;
 }
 
 void Application::mergeOnlineResults() {
@@ -878,7 +970,7 @@ void Application::mergeOnlineResults() {
 
     for (auto& r : online) {
         if (static_cast<int>(merged.size()) >= state_.maxSearchResults) break;
-        merged.push_back({std::move(r.symbol), std::move(r.name), std::move(r.exchange), 200});
+        merged.push_back({std::move(r.symbol), std::move(r.name), std::move(r.exchange), "Online result", 200});
     }
 
     for (const auto& existing : state_.searchResults) {
@@ -894,4 +986,13 @@ void Application::mergeOnlineResults() {
     if (state_.searchSelectedIndex >= static_cast<int>(state_.searchResults.size())) {
         state_.searchSelectedIndex = 0;
     }
+}
+
+void Application::dispatchPendingOnlineSearch() {
+    if (!hasPendingOnlineRequest_) return;
+    double now = ImGui::GetTime();
+    if (now - pendingOnlineRequestAt_ < 0.18) return;
+
+    searchEngine_.requestOnline(pendingOnlineQuery_, state_.maxSearchResults);
+    hasPendingOnlineRequest_ = false;
 }

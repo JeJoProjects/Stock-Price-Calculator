@@ -5,8 +5,23 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(IMGUI_DIR "D:/C++/External Libraries/IMGUI")
-set(GLFW_DIR  "D:/C++/External Libraries/glfw-3.4.bin.WIN64")
+set(THIRD_PARTY_DIR "${CMAKE_SOURCE_DIR}/external")
+set(IMGUI_DIR "${THIRD_PARTY_DIR}/imgui")
+set(GLFW_DIR "${THIRD_PARTY_DIR}/glfw")
+
+if(NOT EXISTS "${IMGUI_DIR}/imgui.cpp")
+    message(FATAL_ERROR "Missing submodule: external/imgui. Run setup.bat to initialize submodules.")
+endif()
+
+if(NOT EXISTS "${GLFW_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Missing submodule: external/glfw. Run setup.bat to initialize submodules.")
+endif()
+
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${GLFW_DIR} ${CMAKE_BINARY_DIR}/_deps/glfw EXCLUDE_FROM_ALL)
+set(GLFW_TARGET glfw)
 
 file(GLOB_RECURSE APP_SOURCES
     src/*.cpp
@@ -35,12 +50,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${GLFW_DIR}/include
 )
 
-target_link_directories(${PROJECT_NAME} PRIVATE
-    ${GLFW_DIR}/lib-mingw-w64
-)
-
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    glfw3
+    ${GLFW_TARGET}
     opengl32
     gdi32
     shell32

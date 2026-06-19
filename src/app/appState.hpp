@@ -9,6 +9,7 @@ struct SearchResultEntry {
     std::string symbol;
     std::string name;
     std::string exchange;
+    std::string preview;
     int score = 0;
 };
 

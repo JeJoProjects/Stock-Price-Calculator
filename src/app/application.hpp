@@ -21,6 +21,9 @@ private:
     GLFWwindow* window_;
     AppState state_;
     search::StockSearchEngine searchEngine_;
+    std::string pendingOnlineQuery_;
+    double pendingOnlineRequestAt_ = 0.0;
+    bool hasPendingOnlineRequest_ = false;
 
     void renderMainWindow();
     void renderTopBar();
@@ -39,6 +42,7 @@ private:
     void resetAll();
     void recalculateAll();
     void handleShortcuts();
-    void applySearchResult(const search::TickerEntry& entry);
+    void applySearchResult(const search::TickerEntry& entry, const std::string& preview = {});
     void mergeOnlineResults();
+    void dispatchPendingOnlineSearch();
 };

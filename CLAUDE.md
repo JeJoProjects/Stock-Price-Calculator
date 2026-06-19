@@ -16,7 +16,8 @@ US stock symbol search with instant autocomplete, and persistent settings.
 
 ### Quick Start
 ```bat
-run_stockcalc.bat                   :: Builds (if needed) and launches the app
+setup.bat                          :: First-time bootstrap, submodules, configure, build
+run_stockcalc.bat                   :: Clean rebuild from scratch and launch the app
 ```
 
 ### Manual Build (MinGW)
@@ -35,14 +36,14 @@ build\test_calc_engine.exe          :: 34 C++ unit tests
 ### Requirements
 - **CMake >= 3.20**
 - **MinGW g++ 12+** (C++23 support required)
-- **Dear ImGui v1.92.9** at `D:\C++\External Libraries\IMGUI\`
-- **GLFW 3.4 (64-bit)** at `D:\C++\External Libraries\glfw-3.4.bin.WIN64\`
+- **Git** for submodule bootstrap
+- **Dear ImGui** and **GLFW** are now checked in as submodules under `external/`
 
 ---
 
 ## Architecture
 
-**Single C++23 executable** — no Python, no DLL, no external runtime.
+**Single C++23 executable** — no DLLs, and setup is self-contained through `setup.bat`.
 
 ```
 ImGui (GPU rendering) ← GLFW window ← OpenGL3 context
@@ -71,9 +72,9 @@ src/
 │   └── panelState.hpp               Per-panel state with field tracking + std::from_chars
 ├── search/
 │   ├── tickerData.hpp/.cpp          JSON loader + TickerEntry struct (sorted by symbol)
-│   └── stockSearchEngine.hpp/.cpp   Prefix + substring search (lower_bound + linear scan)
+│   └── stockSearchEngine.hpp/.cpp   Prefix + substring search + background online worker
 ├── ui/
-│   ├── theme.hpp/.cpp               TradingView colors (ImU32), font loading (Segoe UI, Consolas)
+│   ├── theme.hpp/.cpp               TradingView colors (ImU32), fallback font loading
 │   └── imguiHelpers.hpp             Comma formatting, currency/profit/percent, centering, colors
 ├── config/
 │   └── settingsManager.hpp/.cpp     Load/save JSON preferences (font, window pos/size)
@@ -81,7 +82,11 @@ tests/
 └── testCalcEngine.cpp               34 unit tests for calc engine + field tracking
 data/
 └── us_tickers_full.json             100 US stock tickers for offline search
-CMakeLists.txt                       Build config linking ImGui, GLFW, OpenGL
+CMakeLists.txt                       Build config linking repo-local ImGui/GLFW submodules
+external/
+├── imgui/                           Dear ImGui submodule
+└── glfw/                            GLFW submodule
+setup.bat                            First-time Windows bootstrap and build
 run_stockcalc.bat                    Auto-build + launch script
 ```
 
@@ -121,10 +126,20 @@ border accent. Tracks `lastChanged` and `secondLastChanged` to resolve ambiguity
 - Bundled `us_tickers_full.json` with 100 major US stock symbols
 - Pre-sorted by lowercase symbol at startup
 - Prefix match via `std::ranges::lower_bound` + substring scan
-- Scoring: prefix(100) > symbol-substring(50) > name-substring(25)
-- Instant results from first keystroke, no debounce
-- Keyboard (↑↓ + Enter + Esc) and mouse click navigation
+- Scoring now favors exact symbol, symbol prefix, symbol substring, name prefix, and name substring in that order
+- Offline results appear immediately from the local index
+- Query results are cached in-memory so repeated prefixes return instantly
+- Online search now runs on a background worker instead of blocking input
+- Online lookup is debounced briefly so typing stays fluid while suggestions update
+- Dropdown rows include match previews so users can see why a ticker ranked where it did
+- Keyboard (↑↓ + Enter + Esc) and full-row mouse click navigation
 - Exchange badges (NASDAQ/NYSE/AMEX) in dropdown
+
+## Bootstrap Notes
+
+- `setup.bat` initializes submodules, deletes `build/`, checks `cmake`, `g++`, and builds the app
+- `run_stockcalc.bat` always calls `setup.bat`, so clicking it performs a clean rebuild then launches
+- The build requires repo-local `external/imgui` and `external/glfw`; there is no legacy absolute-path fallback
 
 ---
 

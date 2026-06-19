@@ -15,6 +15,7 @@ struct PanelState {
     std::string tickerSymbol;
     std::string companyName;
     std::string exchange;
+    std::string matchPreview;
 
     int lastChanged = 0;
     int secondLastChanged = 0;
@@ -46,6 +47,7 @@ struct PanelState {
         tickerSymbol.clear();
         companyName.clear();
         exchange.clear();
+        matchPreview.clear();
         lastChanged = 0;
         secondLastChanged = 0;
     }
