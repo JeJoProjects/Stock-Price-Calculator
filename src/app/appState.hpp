@@ -4,6 +4,7 @@
 #include <vector>
 #include "core/calcEngine.hpp"
 #include "core/panelState.hpp"
+#include "market/marketTypes.hpp"
 
 struct SearchResultEntry {
     std::string symbol;
@@ -29,6 +30,9 @@ struct AppState {
     bool showAbout = false;
     bool showStatsBar = true;
     int panelToDelete = -1;
+    std::string finnhubApiKey;
+    std::string chartSymbol;
+    market::Timeframe chartTimeframe = market::Timeframe::day1;
 
     float fontSize = 15.0f;
     bool showExchangeBadges = true;

@@ -17,7 +17,8 @@ US stock symbol search with instant autocomplete, and persistent settings.
 ### Quick Start
 ```bat
 setup.bat                          :: First-time bootstrap, submodules, configure, build
-run_stockcalc.bat                   :: Clean rebuild from scratch and launch the app
+run_stockcalc.bat                   :: Incremental configure/build and launch (changed files only)
+run_stockcalc.bat --clean           :: Optional clean rebuild from scratch and launch
 ```
 
 ### Manual Build (MinGW)
@@ -90,6 +91,16 @@ setup.bat                            First-time Windows bootstrap and build
 run_stockcalc.bat                    Auto-build + launch script
 ```
 
+## Coding Rules
+
+- Prefer modern C++23 features where they make the code smaller, faster, or clearer: lambdas, generic functions, fold expressions, ranges, move semantics, `constexpr`, `std::span`, and deducing `this` when it simplifies ownership and fluent APIs.
+- Use CRTP only when it clearly reduces duplication or removes virtual overhead; do not force it into simple code.
+- Keep responsibilities narrow. Search, UI rendering, persistence, and math should stay in separate layers with minimal cross-talk.
+- Search must stay fast and responsive: favor caching, background work when it measurably helps, and small stable data structures over repeated full scans.
+- UI behavior should be immediate and predictable. Selection targets, keyboard navigation, and previews should all feel like one control system.
+- Math must not be limited to `double` or `long double` if the feature needs more headroom. Prefer an extensible numeric backend or arbitrary-precision support when the problem domain requires it.
+- Preserve Windows-first bootstrap behavior. Fresh clones must work through `setup.bat` and `run_stockcalc.bat` without manual path edits.
+
 ---
 
 ## Smart Field Inference
@@ -135,10 +146,19 @@ border accent. Tracks `lastChanged` and `secondLastChanged` to resolve ambiguity
 - Keyboard (↑↓ + Enter + Esc) and full-row mouse click navigation
 - Exchange badges (NASDAQ/NYSE/AMEX) in dropdown
 
+## Market Data
+
+- Finnhub is the preferred online provider for live quotes, company profiles, and historical candles.
+- Symbols stay local and complete; online data is only for enrichment, charting, and quote details.
+- Chart snapshots are cached by symbol + timeframe and refreshed in the background when selection changes.
+- The Finnhub API key is stored locally with Windows DPAPI encryption through the settings layer.
+- The chart UI lives in a right-side pane with timeframe controls, hover tooltips, and a quote/details strip.
+
 ## Bootstrap Notes
 
 - `setup.bat` initializes submodules, deletes `build/`, checks `cmake`, `g++`, and builds the app
-- `run_stockcalc.bat` always calls `setup.bat`, so clicking it performs a clean rebuild then launches
+- `run_stockcalc.bat` is incremental by default, so unchanged targets are reused and only changed files rebuild
+- `run_stockcalc.bat --clean` forces a full rebuild when you explicitly need it
 - The build requires repo-local `external/imgui` and `external/glfw`; there is no legacy absolute-path fallback
 
 ---

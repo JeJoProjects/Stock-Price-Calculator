@@ -11,6 +11,14 @@
 
 namespace search {
 
+template <typename Key, typename Value>
+[[nodiscard]] const Value* findCachedValue(const std::unordered_map<Key, Value>& cache, const Key& key) {
+    if (auto it = cache.find(key); it != cache.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 enum class MatchKind {
     exactSymbol,
     prefixSymbol,

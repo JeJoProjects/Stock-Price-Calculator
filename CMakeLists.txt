@@ -57,6 +57,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     shell32
     dwmapi
     imm32
+    winhttp
+    crypt32
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE

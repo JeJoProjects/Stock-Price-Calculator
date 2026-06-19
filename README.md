@@ -19,6 +19,12 @@ Built entirely in **C++23** with Dear ImGui + GLFW + OpenGL3.
 run_stockcalc.bat
 ```
 
+Incremental by default (only changed files are rebuilt). For a full clean rebuild:
+
+```bat
+run_stockcalc.bat --clean
+```
+
 Or build manually:
 
 ```bat
@@ -92,7 +98,7 @@ tests/
 data/
   us_tickers_full.json        100 US stock symbols
 CMakeLists.txt                Build config
-run_stockcalc.bat             Auto-build + launch
+run_stockcalc.bat             Incremental build + launch (--clean for full rebuild)
 ```
 
 ---

@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <ctime>
+#include <iterator>
 
 static constexpr float kPanelSpacing = 16.0f;
 static constexpr float kTopBarHeight = 48.0f;
@@ -57,6 +60,8 @@ Application::Application(GLFWwindow* window, const AppSettings& settings)
     state_.maxSearchResults = settings.maxSearchResults;
     state_.showExchangeBadges = settings.showExchangeBadges;
     state_.showStatsBar = settings.showStatsBar;
+    state_.finnhubApiKey = settings.finnhubApiKey;
+    marketData_.setApiKey(state_.finnhubApiKey);
     searchEngine_.load("data/us_tickers_full.json");
     addPanel();
 }
@@ -67,6 +72,7 @@ void Application::saveSettings(int winW, int winH, int winX, int winY) {
     s.maxSearchResults = state_.maxSearchResults;
     s.showExchangeBadges = state_.showExchangeBadges;
     s.showStatsBar = state_.showStatsBar;
+    s.finnhubApiKey = state_.finnhubApiKey;
     s.windowWidth = winW;
     s.windowHeight = winH;
     s.windowX = winX;
@@ -106,6 +112,11 @@ void Application::update() {
     if (searchEngine_.hasOnlineResults() && state_.searchDropdownOpen) {
         mergeOnlineResults();
     }
+
+    syncChartSelection();
+    if (auto snapshot = marketData_.takeLatestSnapshot()) {
+        currentMarketSnapshot_ = std::move(snapshot);
+    }
 }
 
 void Application::renderMainWindow() {
@@ -113,14 +124,32 @@ void Application::renderMainWindow() {
     renderSearchBar();
     if (state_.searchDropdownOpen) renderSearchDropdown();
 
-    float statsH = (state_.showStatsBar && state_.combined.validCount > 0) ? kStatsBarHeight : 0.0f;
-    ImGui::BeginChild("##PanelArea", ImVec2(0, -statsH), ImGuiChildFlags_None);
-    renderPanelArea();
-    ImGui::EndChild();
+    renderWorkspace();
 
     if (state_.showStatsBar && state_.combined.validCount > 0) {
         renderCombinedStatsBar();
     }
+}
+
+void Application::renderWorkspace() {
+    float statsH = (state_.showStatsBar && state_.combined.validCount > 0) ? kStatsBarHeight : 0.0f;
+    ImGui::BeginChild("##Workspace", ImVec2(0, -statsH), ImGuiChildFlags_None);
+
+    float availW = ImGui::GetContentRegionAvail().x;
+    float availH = ImGui::GetContentRegionAvail().y;
+    float minRightW = 360.0f;
+    float maxLeftW = std::max(420.0f, availW - minRightW - kPanelSpacing);
+    float leftW = std::clamp(availW * 0.58f, 460.0f, maxLeftW);
+    ImGui::BeginChild("##LeftPane", ImVec2(leftW, availH), ImGuiChildFlags_None);
+    renderPanelArea();
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+    ImGui::BeginChild("##RightPane", ImVec2(0, availH), ImGuiChildFlags_None);
+    renderChartPane();
+    ImGui::EndChild();
+
+    ImGui::EndChild();
 }
 
 // ── Top Bar ──────────────────────────────────────────────────────────────────
@@ -250,13 +279,19 @@ void Application::renderSearchBar() {
 
     if (changed && !state_.searchQuery.empty()) {
         // Instant: show offline results immediately (<1ms)
-        state_.searchResults.clear();
         auto offline = searchEngine_.search(state_.searchQuery, state_.maxSearchResults);
-        for (const auto& r : offline) {
-            state_.searchResults.push_back({
-                r.entry->symbol, r.entry->name, r.entry->exchange, r.preview, r.score
+        state_.searchResults.clear();
+        state_.searchResults.reserve(offline.size());
+        std::transform(offline.begin(), offline.end(), std::back_inserter(state_.searchResults),
+            [](const search::SearchResult& result) {
+                return SearchResultEntry{
+                    result.entry->symbol,
+                    result.entry->name,
+                    result.entry->exchange,
+                    result.preview,
+                    result.score
+                };
             });
-        }
         state_.searchDropdownOpen = true;
         state_.searchSelectedIndex = 0;
 
@@ -817,6 +852,316 @@ void Application::renderCombinedStatsBar() {
     ImGui::PopStyleColor();
 }
 
+static std::string formatCompactMarketCap(double value) {
+    if (value <= 0.0) return "—";
+    if (value >= 1'000'000'000.0) {
+        return helpers::formatNumber(value / 1'000'000'000.0, 2) + "B";
+    }
+    if (value >= 1'000'000.0) {
+        return helpers::formatNumber(value / 1'000'000.0, 2) + "M";
+    }
+    return helpers::formatNumber(value, 2);
+}
+
+static std::string formatCandleDate(long long unixSeconds) {
+    if (unixSeconds <= 0) return "—";
+    std::time_t t = static_cast<std::time_t>(unixSeconds);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buffer[24];
+    if (std::strftime(buffer, sizeof(buffer), "%b %d", &tm) == 0) return "—";
+    return buffer;
+}
+
+void Application::renderChartPane() {
+    auto snapshot = currentMarketSnapshot_;
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, helpers::toVec4(theme::kBgSecondary));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12.0f);
+    ImGui::BeginChild("##ChartPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+
+    ImFont* bold = theme::getBoldFont();
+    if (bold) ImGui::PushFont(bold);
+    ImGui::TextUnformatted("Market View");
+    if (bold) ImGui::PopFont();
+
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 16.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextUnformatted(state_.chartSymbol.empty() ? "Search a symbol to load chart data" : state_.chartSymbol.c_str());
+    ImGui::PopStyleColor();
+
+    std::string statusLabel = state_.finnhubApiKey.empty() ? "Offline" : "Live";
+    ImU32 statusColor = state_.finnhubApiKey.empty() ? theme::kTextMuted : theme::kProfitGreen;
+    if (snapshot && snapshot->loading) {
+        statusLabel = "Updating";
+        statusColor = theme::kAccentBlue;
+    }
+
+    ImGui::SameLine();
+    const char* timeframeText = market::timeframeLabel(state_.chartTimeframe);
+    float statusWidth = ImGui::CalcTextSize(statusLabel.c_str()).x;
+    float timeframeWidth = ImGui::CalcTextSize(timeframeText).x;
+    float cursorX = std::max(220.0f,
+        ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - statusWidth - timeframeWidth - 28.0f);
+    ImGui::SetCursorPosX(cursorX);
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextUnformatted(timeframeText);
+    ImGui::PopStyleColor();
+    ImGui::SameLine(0, 10.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(statusColor));
+    ImGui::TextUnformatted(statusLabel.c_str());
+    ImGui::PopStyleColor();
+
+    ImGui::Spacing();
+
+    const market::Timeframe timeframes[] = {
+        market::Timeframe::day1, market::Timeframe::week1, market::Timeframe::month1,
+        market::Timeframe::month6, market::Timeframe::year1, market::Timeframe::max
+    };
+    for (auto timeframe : timeframes) {
+        if (timeframe != market::Timeframe::day1) ImGui::SameLine();
+        bool active = (state_.chartTimeframe == timeframe);
+        if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Button, helpers::toVec4(theme::kAccentBlue));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, helpers::toVec4(theme::kAccentBlue));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, helpers::toVec4(theme::kAccentBlue));
+            ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kWhite));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, helpers::toVec4(theme::kBgInput));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, helpers::toVec4(theme::kBgHover));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, helpers::toVec4(theme::kBgHover));
+            ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextPrimary));
+        }
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+        if (ImGui::SmallButton(market::timeframeLabel(timeframe))) {
+            state_.chartTimeframe = timeframe;
+            lastChartRequestKey_.clear();
+            syncChartSelection();
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextUnformatted("Auto-refreshes chart snapshots by symbol and timeframe");
+    ImGui::PopStyleColor();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (!snapshot || snapshot->symbol.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        helpers::textCentered("No symbol selected yet. Search a ticker to load the live chart.");
+        ImGui::PopStyleColor();
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        return;
+    }
+
+    ImGui::TextUnformatted(snapshot->profile.name.empty() ? snapshot->symbol.c_str() : snapshot->profile.name.c_str());
+    if (!snapshot->profile.exchange.empty() || !snapshot->profile.currency.empty()) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        std::string meta = snapshot->profile.exchange;
+        if (!snapshot->profile.currency.empty()) {
+            if (!meta.empty()) meta += " • ";
+            meta += snapshot->profile.currency;
+        }
+        ImGui::TextUnformatted(meta.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::Spacing();
+
+    ImVec2 chartMin = ImGui::GetCursorScreenPos();
+    float chartHeight = std::clamp(ImGui::GetContentRegionAvail().y * 0.46f, 250.0f, 360.0f);
+    ImVec2 chartSize = ImVec2(ImGui::GetContentRegionAvail().x, chartHeight);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(chartMin, ImVec2(chartMin.x + chartSize.x, chartMin.y + chartSize.y), theme::kBgInput, 10.0f);
+    dl->AddRect(chartMin, ImVec2(chartMin.x + chartSize.x, chartMin.y + chartSize.y), theme::kBorder, 10.0f, 0, 1.0f);
+
+    ImGui::InvisibleButton("##ChartCanvas", chartSize);
+    bool hovered = ImGui::IsItemHovered();
+    ImVec2 mouse = ImGui::GetIO().MousePos;
+
+    const auto& candles = snapshot->candles;
+    if (candles.empty()) {
+        ImGui::SetCursorScreenPos(ImVec2(chartMin.x + 16.0f, chartMin.y + 16.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        ImGui::TextUnformatted(snapshot->loading ? "Loading chart..." : "No candle data available.");
+        ImGui::PopStyleColor();
+    } else {
+        double minPrice = candles.front().low;
+        double maxPrice = candles.front().high;
+        for (const auto& candle : candles) {
+            minPrice = std::min(minPrice, candle.low);
+            maxPrice = std::max(maxPrice, candle.high);
+        }
+        if (std::fabs(maxPrice - minPrice) < 0.0001) {
+            maxPrice += 1.0;
+            minPrice -= 1.0;
+        }
+
+        float leftPad = 14.0f;
+        float rightPad = 60.0f;
+        float topPad = 14.0f;
+        float bottomPad = 24.0f;
+        float plotX = chartMin.x + leftPad;
+        float plotY = chartMin.y + topPad;
+        float plotW = chartSize.x - leftPad - rightPad;
+        float plotH = chartSize.y - topPad - bottomPad;
+
+        auto toX = [&](std::size_t index) {
+            return plotX + (plotW * (static_cast<float>(index) / std::max<std::size_t>(1, candles.size() - 1)));
+        };
+        auto toY = [&](double value) {
+            float t = static_cast<float>((value - minPrice) / (maxPrice - minPrice));
+            return plotY + plotH - (plotH * t);
+        };
+
+        // Horizontal guide lines
+        for (int i = 0; i < 4; ++i) {
+            float y = plotY + (plotH * i / 3.0f);
+            dl->AddLine(ImVec2(plotX, y), ImVec2(plotX + plotW, y), helpers::withAlpha(theme::kBorder, 0.35f), 1.0f);
+        }
+
+        std::string maxLabel = helpers::formatCurrency(maxPrice);
+        std::string midLabel = helpers::formatCurrency((maxPrice + minPrice) * 0.5);
+        std::string minLabel = helpers::formatCurrency(minPrice);
+        dl->AddText(ImVec2(plotX + plotW + 8.0f, plotY - 6.0f), theme::kTextMuted, maxLabel.c_str());
+        dl->AddText(ImVec2(plotX + plotW + 8.0f, plotY + plotH * 0.5f - 8.0f), theme::kTextMuted, midLabel.c_str());
+        dl->AddText(ImVec2(plotX + plotW + 8.0f, plotY + plotH - 14.0f), theme::kTextMuted, minLabel.c_str());
+
+        std::size_t hoveredIndex = candles.size();
+        if (hovered) {
+            float closest = FLT_MAX;
+            for (std::size_t i = 0; i < candles.size(); ++i) {
+                float x = toX(i);
+                float dist = std::fabs(mouse.x - x);
+                if (dist < closest) {
+                    closest = dist;
+                    hoveredIndex = i;
+                }
+            }
+        }
+
+        for (std::size_t i = 0; i < candles.size(); ++i) {
+            const auto& candle = candles[i];
+            float x = toX(i);
+            float wickTop = toY(candle.high);
+            float wickBottom = toY(candle.low);
+            float openY = toY(candle.open);
+            float closeY = toY(candle.close);
+            bool green = candle.close >= candle.open;
+            ImU32 bodyColor = green ? theme::kProfitGreen : theme::kLossRed;
+            dl->AddLine(ImVec2(x, wickTop), ImVec2(x, wickBottom), bodyColor, 1.5f);
+            float bodyTop = std::min(openY, closeY);
+            float bodyBottom = std::max(openY, closeY);
+            float bodyHalf = std::max(2.0f, plotW / std::max<float>(static_cast<float>(candles.size()) * 4.0f, 1.0f));
+            dl->AddRectFilled(ImVec2(x - bodyHalf, bodyTop), ImVec2(x + bodyHalf, bodyBottom), bodyColor, 1.5f);
+        }
+
+        if (hoveredIndex < candles.size()) {
+            const auto& candle = candles[hoveredIndex];
+            float x = toX(hoveredIndex);
+            dl->AddLine(ImVec2(x, plotY), ImVec2(x, plotY + plotH), helpers::withAlpha(theme::kAccentBlue, 0.55f), 1.0f);
+            dl->AddRectFilled(ImVec2(x - 2.0f, plotY), ImVec2(x + 2.0f, plotY + plotH), helpers::withAlpha(theme::kAccentBlue, 0.08f));
+
+            char tooltip[256];
+            std::snprintf(tooltip, sizeof(tooltip), "O %.2f  H %.2f  L %.2f  C %.2f  V %.0f",
+                candle.open, candle.high, candle.low, candle.close, candle.volume);
+            std::string dateText = formatCandleDate(candle.time);
+            ImVec2 dateSize = ImGui::CalcTextSize(dateText.c_str());
+            ImVec2 valueSize = ImGui::CalcTextSize(tooltip);
+            float tipWidth = std::max(dateSize.x, valueSize.x) + 14.0f;
+            float tipHeight = dateSize.y + valueSize.y + 14.0f;
+            ImVec2 tipPos = ImVec2(std::min(mouse.x + 16.0f, chartMin.x + chartSize.x - tipWidth - 14.0f),
+                std::max(chartMin.y + 8.0f, mouse.y - 28.0f));
+            dl->AddRectFilled(tipPos, ImVec2(tipPos.x + tipWidth, tipPos.y + tipHeight), IM_COL32(20, 24, 32, 240), 8.0f);
+            dl->AddRect(tipPos, ImVec2(tipPos.x + tipWidth, tipPos.y + tipHeight), theme::kBorder, 8.0f, 0, 1.0f);
+            dl->AddText(ImVec2(tipPos.x + 7.0f, tipPos.y + 4.0f), theme::kTextMuted, dateText.c_str());
+            dl->AddText(ImVec2(tipPos.x + 7.0f, tipPos.y + 18.0f), theme::kWhite, tooltip);
+        }
+
+        std::string startDate = formatCandleDate(candles.front().time);
+        std::string endDate = formatCandleDate(candles.back().time);
+        dl->AddText(ImVec2(plotX, plotY + plotH + 6.0f), theme::kTextMuted, startDate.c_str());
+        ImVec2 endSize = ImGui::CalcTextSize(endDate.c_str());
+        dl->AddText(ImVec2(plotX + plotW - endSize.x, plotY + plotH + 6.0f), theme::kTextMuted, endDate.c_str());
+
+        if (snapshot->loading) {
+            const char* updating = "Updating...";
+            ImVec2 upSize = ImGui::CalcTextSize(updating);
+            ImVec2 upMin(chartMin.x + chartSize.x - upSize.x - 24.0f, chartMin.y + 10.0f);
+            ImVec2 upMax(upMin.x + upSize.x + 12.0f, upMin.y + upSize.y + 6.0f);
+            dl->AddRectFilled(upMin, upMax, IM_COL32(30, 36, 48, 220), 8.0f);
+            dl->AddRect(upMin, upMax, helpers::withAlpha(theme::kAccentBlue, 0.65f), 8.0f, 0, 1.0f);
+            dl->AddText(ImVec2(upMin.x + 6.0f, upMin.y + 3.0f), theme::kAccentBlue, updating);
+        }
+
+        ImGui::SetCursorScreenPos(ImVec2(chartMin.x + 12.0f, chartMin.y + chartSize.y + 4.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        ImGui::TextUnformatted("Hover the chart for candle values");
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    auto compactBlock = [&](const char* label, const std::string& value, ImU32 color = theme::kWhite) {
+        ImGui::BeginGroup();
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+        ImGui::TextUnformatted(label);
+        ImGui::PopStyleColor();
+        ImFont* mono = theme::getMonoFont();
+        if (mono) ImGui::PushFont(mono);
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(color));
+        ImGui::TextUnformatted(value.c_str());
+        ImGui::PopStyleColor();
+        if (mono) ImGui::PopFont();
+        ImGui::EndGroup();
+    };
+
+    ImU32 quoteColor = snapshot->quote.change >= 0.0 ? theme::kProfitGreen : theme::kLossRed;
+    compactBlock("Last", helpers::formatCurrency(snapshot->quote.current), quoteColor);
+    ImGui::SameLine(0, 22);
+    compactBlock("Change", helpers::formatProfit(snapshot->quote.change), quoteColor);
+    ImGui::SameLine(0, 22);
+    compactBlock("Range", helpers::formatCurrency(snapshot->quote.low) + " - " + helpers::formatCurrency(snapshot->quote.high));
+    ImGui::SameLine(0, 22);
+    compactBlock("Mkt Cap", formatCompactMarketCap(snapshot->profile.marketCap));
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextUnformatted("Quote Details");
+    ImGui::Spacing();
+    ImGui::Text("Open: %s", helpers::formatCurrency(snapshot->quote.open).c_str());
+    ImGui::Text("Prev Close: %s", helpers::formatCurrency(snapshot->quote.previousClose).c_str());
+    ImGui::Text("Volume: %s", helpers::formatNumber(snapshot->candles.empty() ? 0.0 : snapshot->candles.back().volume, 0).c_str());
+    ImGui::Text("Exchange: %s", snapshot->profile.exchange.empty() ? "—" : snapshot->profile.exchange.c_str());
+
+    if (!snapshot->error.empty()) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kLossRed));
+        ImGui::TextWrapped("%s", snapshot->error.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+}
+
 // ── Preferences Dialog ──────────────────────────────────────────────────────
 
 void Application::renderPreferencesDialog() {
@@ -846,6 +1191,19 @@ void Application::renderPreferencesDialog() {
 
     ImGui::Checkbox("Show Exchange Badges", &state_.showExchangeBadges);
     ImGui::Checkbox("Show Stats Bar", &state_.showStatsBar);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextUnformatted("Finnhub");
+    ImGui::PushStyleColor(ImGuiCol_Text, helpers::toVec4(theme::kTextMuted));
+    ImGui::TextWrapped("Stored locally using Windows DPAPI encryption. Leave blank to disable online charts.");
+    ImGui::PopStyleColor();
+    ImGui::PushItemWidth(-1);
+    ImGui::InputTextWithHint("##FinnhubKey", "Enter Finnhub API key", &state_.finnhubApiKey,
+        ImGuiInputTextFlags_Password | ImGuiInputTextFlags_AutoSelectAll);
+    ImGui::PopItemWidth();
 
     ImGui::Spacing();
     ImGui::Spacing();
@@ -958,6 +1316,8 @@ void Application::applySearchResult(const search::TickerEntry& entry, const std:
     panel.companyName = entry.name;
     panel.exchange = entry.exchange;
     panel.matchPreview = preview.empty() ? std::string("Selected from search") : preview;
+    state_.chartSymbol = entry.symbol;
+    marketData_.requestSnapshot(state_.chartSymbol, state_.chartTimeframe);
 }
 
 void Application::mergeOnlineResults() {
@@ -968,9 +1328,11 @@ void Application::mergeOnlineResults() {
     std::vector<SearchResultEntry> merged;
     merged.reserve(state_.maxSearchResults);
 
-    for (auto& r : online) {
-        if (static_cast<int>(merged.size()) >= state_.maxSearchResults) break;
-        merged.push_back({std::move(r.symbol), std::move(r.name), std::move(r.exchange), "Online result", 200});
+    std::transform(online.begin(), online.end(), std::back_inserter(merged), [](const search::OnlineResult& result) {
+        return SearchResultEntry{result.symbol, result.name, result.exchange, "Online result", 200};
+    });
+    if (static_cast<int>(merged.size()) > state_.maxSearchResults) {
+        merged.resize(state_.maxSearchResults);
     }
 
     for (const auto& existing : state_.searchResults) {
@@ -995,4 +1357,24 @@ void Application::dispatchPendingOnlineSearch() {
 
     searchEngine_.requestOnline(pendingOnlineQuery_, state_.maxSearchResults);
     hasPendingOnlineRequest_ = false;
+}
+
+void Application::syncChartSelection() {
+    if (state_.chartSymbol.empty()) {
+        for (const auto& panel : state_.panels) {
+            if (!panel.tickerSymbol.empty()) {
+                state_.chartSymbol = panel.tickerSymbol;
+                break;
+            }
+        }
+    }
+
+    if (state_.chartSymbol.empty()) return;
+
+    marketData_.setApiKey(state_.finnhubApiKey);
+    std::string key = state_.chartSymbol + "|" + std::to_string(static_cast<int>(state_.chartTimeframe));
+    if (key != lastChartRequestKey_) {
+        lastChartRequestKey_ = key;
+        marketData_.requestSnapshot(state_.chartSymbol, state_.chartTimeframe);
+    }
 }

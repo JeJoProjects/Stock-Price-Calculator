@@ -7,6 +7,7 @@ struct AppSettings {
     int maxSearchResults = 12;
     bool showExchangeBadges = true;
     bool showStatsBar = true;
+    std::string finnhubApiKey;
     int windowWidth = 1600;
     int windowHeight = 900;
     int windowX = -1;

@@ -1,6 +1,5 @@
 #include "search/stockSearchEngine.hpp"
 #include <algorithm>
-#include <ranges>
 #include <cctype>
 #include <cstdio>
 #include <array>
@@ -20,8 +19,12 @@ static std::string toLower(std::string_view sv) {
     return result;
 }
 
+static bool startsWith(const std::string& text, const std::string& query) {
+    return text.size() >= query.size() && text.compare(0, query.size(), query) == 0;
+}
+
 static bool startsWithWord(const std::string& text, const std::string& query) {
-    if (text.starts_with(query)) return true;
+    if (startsWith(text, query)) return true;
     auto pos = text.find(query);
     if (pos == std::string::npos) return false;
     return pos == 0 || !std::isalnum(static_cast<unsigned char>(text[pos - 1]));
@@ -84,18 +87,21 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
     if (query.empty() || tickers_.empty()) return {};
 
     std::string q = normalizeQuery(query);
-    if (auto cacheIt = queryCache_.find(q); cacheIt != queryCache_.end()) {
-        auto cached = cacheIt->second;
-        if (static_cast<int>(cached.size()) > maxResults) cached.resize(maxResults);
-        return cached;
+    if (const auto* cached = findCachedValue(queryCache_, q)) {
+        auto results = *cached;
+        if (static_cast<int>(results.size()) > maxResults) results.resize(maxResults);
+        return results;
     }
 
     std::vector<SearchResult> results;
     results.reserve(maxResults * 2);
 
-    auto lower = std::ranges::lower_bound(tickers_, q, {}, &TickerEntry::symbolLower);
+    auto lower = std::lower_bound(tickers_.begin(), tickers_.end(), q,
+        [](const TickerEntry& entry, const std::string& value) {
+            return entry.symbolLower < value;
+        });
     for (auto it = lower; it != tickers_.end(); ++it) {
-        if (!it->symbolLower.starts_with(q)) break;
+        if (!startsWith(it->symbolLower, q)) break;
         int score = 130;
         MatchKind kind = MatchKind::exactSymbol;
         if (it->symbolLower != q) {
@@ -107,7 +113,7 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
 
     if (static_cast<int>(results.size()) < maxResults) {
         for (const auto& t : tickers_) {
-            if (t.symbolLower.starts_with(q)) continue;
+            if (startsWith(t.symbolLower, q)) continue;
 
             if (t.symbolLower.find(q) != std::string::npos) {
                 results.push_back({&t, 90, MatchKind::symbolSubstring, kindPreview(MatchKind::symbolSubstring)});
@@ -121,7 +127,7 @@ std::vector<SearchResult> StockSearchEngine::search(const std::string& query, in
         }
     }
 
-    std::ranges::sort(results, [](const SearchResult& lhs, const SearchResult& rhs) {
+    std::sort(results.begin(), results.end(), [](const SearchResult& lhs, const SearchResult& rhs) {
         if (lhs.score != rhs.score) return lhs.score > rhs.score;
         return lhs.entry->symbol < rhs.entry->symbol;
     });
@@ -135,9 +141,9 @@ void StockSearchEngine::requestOnline(const std::string& query, int maxResults) 
     if (pythonPath_.empty() || query.size() < 2) return;
 
     std::string q = normalizeQuery(query);
-    if (auto cacheIt = onlineCache_.find(q); cacheIt != onlineCache_.end()) {
+    if (const auto* cached = findCachedValue(onlineCache_, q)) {
         std::lock_guard<std::mutex> lock(mutex_);
-        onlineResults_ = cacheIt->second;
+        onlineResults_ = *cached;
         if (static_cast<int>(onlineResults_.size()) > maxResults) onlineResults_.resize(maxResults);
         onlineReady_.store(true);
         onlineBusy_.store(false);
@@ -242,7 +248,7 @@ bool StockSearchEngine::hasOnlineResults() const {
 std::vector<OnlineResult> StockSearchEngine::takeOnlineResults() {
     std::lock_guard<std::mutex> lock(mutex_);
     onlineReady_.store(false);
-    return std::move(onlineResults_);
+    return std::exchange(onlineResults_, {});
 }
 
 std::string StockSearchEngine::normalizeQuery(const std::string& query) {

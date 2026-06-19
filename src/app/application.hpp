@@ -5,6 +5,9 @@
 #include "config/settingsManager.hpp"
 #include "ui/theme.hpp"
 #include "search/stockSearchEngine.hpp"
+#include "market/marketDataService.hpp"
+
+#include <optional>
 
 struct GLFWwindow;
 
@@ -21,9 +24,12 @@ private:
     GLFWwindow* window_;
     AppState state_;
     search::StockSearchEngine searchEngine_;
+    market::MarketDataService marketData_;
+    std::optional<market::Snapshot> currentMarketSnapshot_;
     std::string pendingOnlineQuery_;
     double pendingOnlineRequestAt_ = 0.0;
     bool hasPendingOnlineRequest_ = false;
+    std::string lastChartRequestKey_;
 
     void renderMainWindow();
     void renderTopBar();
@@ -31,6 +37,8 @@ private:
     void renderSearchBar();
     void renderSearchDropdown();
     void renderPanelArea();
+    void renderWorkspace();
+    void renderChartPane();
     void renderSinglePanel(int index);
     void renderNewPurchaseCard();
     void renderCombinedStatsBar();
@@ -45,4 +53,5 @@ private:
     void applySearchResult(const search::TickerEntry& entry, const std::string& preview = {});
     void mergeOnlineResults();
     void dispatchPendingOnlineSearch();
+    void syncChartSelection();
 };
