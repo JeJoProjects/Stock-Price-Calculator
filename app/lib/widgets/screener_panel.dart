@@ -8,6 +8,10 @@ import '../theme/app_theme.dart';
 /// screener, replicating the Finviz "unusual volume" view the user wants
 /// (market cap < $500M, large % move), backed by the Dart server's
 /// /screener/top endpoint rather than scraping Finviz directly.
+///
+/// Status (gain/loss) is never color-alone here - every colored value pairs
+/// with an up/down icon, per the app's own accessibility bar for status
+/// encoding (see CombinedStatsBar / PurchasePanelCard for the same rule).
 class ScreenerPanel extends StatefulWidget {
   final ScreenerClient client;
   final void Function(ScreenerRow row) onSelect;
@@ -20,6 +24,7 @@ class ScreenerPanel extends StatefulWidget {
 
 class _ScreenerPanelState extends State<ScreenerPanel> {
   ScreenerSnapshot _snapshot = const ScreenerSnapshot();
+  int? _hoveredIndex;
 
   @override
   void initState() {
@@ -36,6 +41,8 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
     super.dispose();
   }
 
+  bool get _isLive => _snapshot.error == null && _snapshot.lastUpdated != null;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -44,89 +51,285 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
         borderRadius: BorderRadius.circular(kCardRadius),
         border: Border.all(color: AppColors.border),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text('Micro-Cap Movers',
-                      style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15)),
-                ),
-                if (_snapshot.lastUpdated != null)
-                  Text(_relativeTime(_snapshot.lastUpdated!),
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
-              ],
-            ),
-          ),
+          _header(),
           const Divider(height: 1, color: AppColors.border),
-          if (_snapshot.error != null)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(_snapshot.error!,
-                  style: const TextStyle(color: AppColors.lossRed, fontSize: 12)),
-            )
-          else if (_snapshot.rows.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No movers matching criteria yet.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: _snapshot.rows.length,
-                separatorBuilder: (_, _) => const Divider(height: 1, color: AppColors.border),
-                itemBuilder: (context, i) => _row(_snapshot.rows[i]),
-              ),
-            ),
+          Expanded(child: _body()),
         ],
       ),
     );
   }
 
-  Widget _row(ScreenerRow row) {
-    final positive = row.changePercent >= 0;
-    final color = positive ? AppColors.profitGreen : AppColors.lossRed;
-    return InkWell(
-      onTap: () => widget.onSelect(row),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(row.symbol,
-                      style: const TextStyle(
-                          color: AppColors.white, fontFamily: 'Consolas', fontWeight: FontWeight.bold)),
-                  Text(row.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-                  Text('Cap ${formatCompactMarketCap(row.marketCap)}',
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
-                ],
-              ),
+  Widget _header() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF232838), AppColors.bgSecondary],
+        ),
+        border: Border(top: BorderSide(color: AppColors.accentBlue, width: 2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.accentBlue.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(8),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: const Icon(Icons.bolt_rounded, size: 16, color: AppColors.accentBlue),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(formatCurrency(row.price),
-                    style: const TextStyle(color: AppColors.textPrimary, fontFamily: 'Consolas')),
-                Text('${positive ? '+' : ''}${row.changePercent.toStringAsFixed(2)}%',
-                    style: TextStyle(color: color, fontFamily: 'Consolas', fontWeight: FontWeight.bold)),
+                const Text('Micro-Cap Movers',
+                    style: TextStyle(
+                        color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15)),
+                Text(
+                  'Unusual moves under \$500M',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),
+                ),
               ],
             ),
+          ),
+          _liveBadge(),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveBadge() {
+    final label =
+        _isLive ? _relativeTime(_snapshot.lastUpdated!) : (_snapshot.error != null ? 'Error' : '—');
+    final dotColor = _isLive ? AppColors.profitGreen : AppColors.textMuted;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Text(_isLive ? 'LIVE' : 'IDLE',
+                style: TextStyle(
+                    color: dotColor,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.6)),
           ],
         ),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
+      ],
+    );
+  }
+
+  Widget _body() {
+    if (_snapshot.error != null) {
+      return _emptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Can\'t reach the backend',
+        subtitle: _snapshot.error!,
+        iconColor: AppColors.lossRed,
+      );
+    }
+    if (_snapshot.rows.isEmpty) {
+      return _emptyState(
+        icon: Icons.search_off_rounded,
+        title: 'No movers right now',
+        subtitle: 'Nothing under \$500M cap has moved enough to qualify.',
+        iconColor: AppColors.textMuted,
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: _snapshot.rows.length,
+      separatorBuilder: (_, _) => const Divider(height: 1, color: AppColors.border, indent: 16),
+      itemBuilder: (context, i) => _row(i, _snapshot.rows[i]),
+    );
+  }
+
+  Widget _emptyState({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color iconColor,
+  }) {
+    // Scrollable-centered-content pattern: centers when there's room, scrolls
+    // instead of overflowing when the panel is squeezed very short.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(child: _emptyStateContent(icon, title, subtitle, iconColor)),
+        ),
       ),
+    );
+  }
+
+  Widget _emptyStateContent(IconData icon, String title, String subtitle, Color iconColor) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 22, color: iconColor),
+            ),
+            const SizedBox(height: 12),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 4),
+            Text(subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4)),
+          ],
+        ),
+      );
+  }
+
+  Widget _row(int index, ScreenerRow row) {
+    final positive = row.changePercent >= 0;
+    final statusColor = positive ? AppColors.profitGreen : AppColors.lossRed;
+    final hovered = _hoveredIndex == index;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoveredIndex = index),
+      onExit: (_) => setState(() => _hoveredIndex = null),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => widget.onSelect(row),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          color: hovered ? AppColors.accentBlue.withValues(alpha: 0.08) : Colors.transparent,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _rankBadge(index + 1),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(row.symbol,
+                            style: const TextStyle(
+                                color: AppColors.white,
+                                fontFamily: 'Consolas',
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(row.exchange,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(row.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                    const SizedBox(height: 4),
+                    _capChip(row.marketCap),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(formatCurrency(row.price),
+                      style: const TextStyle(
+                          color: AppColors.textPrimary, fontFamily: 'Consolas', fontSize: 12.5)),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          positive ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                          size: 11,
+                          color: statusColor,
+                        ),
+                        const SizedBox(width: 2),
+                        Text('${row.changePercent.abs().toStringAsFixed(2)}%',
+                            style: TextStyle(
+                                color: statusColor,
+                                fontFamily: 'Consolas',
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11.5)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rankBadge(int rank) {
+    // Top 3 get a subtle accent treatment so the ranking reads at a glance,
+    // matching the app's existing accent-blue-for-emphasis convention.
+    final isTopThree = rank <= 3;
+    return Container(
+      width: 20,
+      height: 20,
+      margin: const EdgeInsets.only(top: 1),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: isTopThree ? AppColors.accentBlue.withValues(alpha: 0.18) : AppColors.bgInput,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text('$rank',
+          style: TextStyle(
+              color: isTopThree ? AppColors.accentBlue : AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _capChip(double marketCap) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.bgInput,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text('Cap ${formatCompactMarketCap(marketCap)}',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
     );
   }
 

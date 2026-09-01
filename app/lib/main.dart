@@ -298,29 +298,42 @@ class _HomePageState extends State<HomePage> with WindowListener {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Centered, wrapping layout: with few panels the group
+                    // sits in the visual middle of the area (reads as
+                    // intentional) rather than pinned top-left with a huge
+                    // empty area below; with many panels it flows into
+                    // additional rows, filling both width and height.
                     Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              for (var i = 0; i < _panels.length; i++)
-                                PurchasePanelCard(
-                                  key: ValueKey(_panels[i].id),
-                                  panel: _panels[i],
-                                  result: _results[i],
-                                  canDelete: _panels.length > 1,
-                                  onFieldChanged: (fieldId, text) =>
-                                      _onFieldChanged(i, fieldId, text),
-                                  onReset: () => setState(() {
-                                    _panels[i].reset();
-                                    _recalculateAll();
-                                  }),
-                                  onDelete: () => _removePanel(i),
-                                ),
-                              NewPurchaseCard(onTap: _addPanel),
-                            ],
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                            child: Center(
+                              child: Wrap(
+                                alignment: WrapAlignment.center,
+                                runAlignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: kPanelSpacing,
+                                runSpacing: kPanelSpacing,
+                                children: [
+                                  for (var i = 0; i < _panels.length; i++)
+                                    PurchasePanelCard(
+                                      key: ValueKey(_panels[i].id),
+                                      panel: _panels[i],
+                                      result: _results[i],
+                                      canDelete: _panels.length > 1,
+                                      onFieldChanged: (fieldId, text) =>
+                                          _onFieldChanged(i, fieldId, text),
+                                      onReset: () => setState(() {
+                                        _panels[i].reset();
+                                        _recalculateAll();
+                                      }),
+                                      onDelete: () => _removePanel(i),
+                                    ),
+                                  NewPurchaseCard(onTap: _addPanel),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -330,8 +343,9 @@ class _HomePageState extends State<HomePage> with WindowListener {
                       margin: const EdgeInsets.only(left: kPanelSpacing),
                       child: Column(
                         children: [
+                          // Market View gets the larger share of the column.
                           Expanded(
-                            flex: 3,
+                            flex: 2,
                             child: ChartPane(
                               symbol: _chartSymbol,
                               companyName: _chartCompany,
@@ -341,7 +355,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
                           ),
                           const SizedBox(height: kPanelSpacing),
                           Expanded(
-                            flex: 2,
+                            flex: 1,
                             child: ScreenerPanel(client: _screenerClient, onSelect: _applyScreenerRow),
                           ),
                         ],
@@ -351,7 +365,10 @@ class _HomePageState extends State<HomePage> with WindowListener {
                 ),
               ),
             ),
-            if (_combined.validCount > 0 && _settings.showStatsBar)
+            // Shown purely based on the user's preference now, not gated on
+            // having a valid panel - a toggled-on bar that silently stays
+            // hidden until you fill in numbers reads as broken.
+            if (_settings.showStatsBar)
               CombinedStatsBar(combined: _combined, onResetAll: _resetAll),
           ],
         ),

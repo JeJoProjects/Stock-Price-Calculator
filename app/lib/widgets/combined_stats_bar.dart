@@ -3,8 +3,10 @@ import '../core/calc_engine.dart';
 import '../core/formatting.dart';
 import '../theme/app_theme.dart';
 
-/// Ported from Application::renderCombinedStatsBar. Shown only when
-/// validCount > 0 (mirrors the old app's visibility rule).
+/// Ported from Application::renderCombinedStatsBar. Visibility is controlled
+/// purely by the user's "Show Stats Bar" preference (not gated on having a
+/// valid panel - see main.dart), so it renders correctly even with all
+/// figures at zero.
 class CombinedStatsBar extends StatelessWidget {
   final CombinedResult combined;
   final VoidCallback onResetAll;
@@ -27,16 +29,32 @@ class CombinedStatsBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _stat('Avg Price', formatCurrency(combined.avgSharePrice), AppColors.textPrimary),
-          const SizedBox(width: 32),
-          _stat('Total Investment', formatCurrency(combined.totalInvestment), AppColors.textPrimary),
-          const SizedBox(width: 32),
-          _stat('Total Shares', formatNumber(combined.totalShares, decimals: 0), AppColors.textPrimary),
-          const SizedBox(width: 32),
-          _stat('Total Profit', formatProfit(combined.totalProfit), _profitColor(combined.totalProfit)),
-          const SizedBox(width: 32),
-          _stat('Avg Profit', formatProfit(combined.avgProfit), _profitColor(combined.avgProfit)),
-          const Spacer(),
+          // Scrolls horizontally rather than overflowing at narrow widths -
+          // this bar is always visible now (not gated on having a valid
+          // panel), so it needs to hold up at any window size.
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _stat('Avg Price', formatCurrency(combined.avgSharePrice), AppColors.textPrimary),
+                  const SizedBox(width: 32),
+                  _stat('Total Investment', formatCurrency(combined.totalInvestment),
+                      AppColors.textPrimary),
+                  const SizedBox(width: 32),
+                  _stat('Total Shares', formatNumber(combined.totalShares, decimals: 0),
+                      AppColors.textPrimary),
+                  const SizedBox(width: 32),
+                  _stat('Total Profit', formatProfit(combined.totalProfit),
+                      _profitColor(combined.totalProfit)),
+                  const SizedBox(width: 32),
+                  _stat('Avg Profit', formatProfit(combined.avgProfit),
+                      _profitColor(combined.avgProfit)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
           SizedBox(
             width: 100,
             height: 36,
