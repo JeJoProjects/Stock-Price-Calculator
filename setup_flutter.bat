@@ -2,30 +2,29 @@
 setlocal
 
 rem New Flutter+Dart bootstrap script (see .claude plan: migration to Flutter/Dart).
-rem This is intentionally a separate script from setup.bat while the old C++
-rem app is still the parity reference; it becomes setup.bat once that app is
-rem retired.
+rem This is the repo setup entrypoint for the Flutter-only app.
 
-echo [1/4] Checking for Flutter SDK on PATH...
-where flutter >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Flutter was not found on PATH.
-    echo Install it from https://docs.flutter.dev/get-started/install/windows
-    echo ^(clone https://github.com/flutter/flutter.git -b stable and add its bin\ to PATH^)
-    pause
-    exit /b 1
-)
+call :ResolveFlutterSdk
+if errorlevel 1 goto :Error
+
+echo [1/4] Checking for Flutter SDK...
+echo Using Flutter SDK at "%FLUTTER_ROOT%"
+echo.
 
 echo [2/4] Running flutter doctor ^(checks the Windows desktop toolchain^)...
-call flutter doctor
+call "%FLUTTER_CMD%" config --enable-windows-desktop
+call "%FLUTTER_CMD%" doctor
 echo.
 echo NOTE: the Windows build also needs Visual Studio Build Tools with the
 echo "Desktop development with C++" workload. If flutter doctor flagged that
 echo above, install it before continuing: https://visualstudio.microsoft.com/downloads/
 
+call :CheckDeveloperMode
+if errorlevel 1 goto :Error
+
 echo [3/4] Fetching backend dependencies...
 pushd backend
-call dart pub get
+call "%DART_CMD%" pub get
 if errorlevel 1 (
     echo ERROR: dart pub get failed in backend\.
     popd
@@ -43,14 +42,14 @@ if errorlevel 1 (
     exit /b 1
 )
 pushd app
-call flutter pub get
+call "%FLUTTER_CMD%" pub get
 if errorlevel 1 (
     echo ERROR: flutter pub get failed in app\.
     popd
     pause
     exit /b 1
 )
-call flutter build windows
+call "%FLUTTER_CMD%" build windows
 if errorlevel 1 (
     echo ERROR: flutter build windows failed.
     popd
@@ -65,3 +64,101 @@ echo Set FINNHUB_API_KEY before starting backend\bin\server.dart to enable
 echo live quotes, charts, and the micro-cap screener.
 echo Run run_flutter.bat to launch the app.
 endlocal
+exit /b 0
+
+:Error
+echo.
+pause
+endlocal
+exit /b 1
+
+:ResolveFlutterSdk
+set "FLUTTER_ROOT_IN=%FLUTTER_ROOT%"
+set "FLUTTER_HOME_IN=%FLUTTER_HOME%"
+set "FLUTTER_ROOT="
+set "FLUTTER_CMD="
+set "DART_CMD="
+set "LOCAL_FLUTTER_ROOT=%~dp0external\flutter"
+
+if defined FLUTTER_ROOT_IN if exist "%FLUTTER_ROOT_IN%\bin\flutter.bat" set "FLUTTER_ROOT=%FLUTTER_ROOT_IN%" & goto :FlutterFound
+if defined FLUTTER_HOME_IN if exist "%FLUTTER_HOME_IN%\bin\flutter.bat" set "FLUTTER_ROOT=%FLUTTER_HOME_IN%"
+if defined FLUTTER_ROOT if exist "%FLUTTER_ROOT%\bin\flutter.bat" goto :FlutterFound
+
+for %%I in (
+    "%~dp0flutter"
+    "%~dp0..\flutter"
+    "C:\flutter"
+    "C:\src\flutter"
+    "%LOCALAPPDATA%\Programs\flutter"
+    "%LOCALAPPDATA%\flutter"
+    "%USERPROFILE%\flutter"
+) do (
+    if exist "%%~I\bin\flutter.bat" (
+        set "FLUTTER_ROOT=%%~fI"
+        goto :FlutterFound
+    )
+)
+
+for /f "delims=" %%I in ('where flutter.bat 2^>nul') do (
+    for %%J in ("%%~dpI..") do (
+        if exist "%%~fJ\bin\flutter.bat" (
+            set "FLUTTER_ROOT=%%~fJ"
+            goto :FlutterFound
+        )
+    )
+)
+
+echo ERROR: Flutter SDK was not found.
+echo Checked FLUTTER_ROOT, FLUTTER_HOME, and common install locations.
+echo Attempting to bootstrap a repo-local Flutter copy in external\flutter...
+
+where git >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Git is required to download Flutter automatically.
+    exit /b 1
+)
+
+if not exist "%~dp0external" mkdir "%~dp0external"
+if exist "%LOCAL_FLUTTER_ROOT%" rmdir /s /q "%LOCAL_FLUTTER_ROOT%"
+
+git clone --depth 1 -b stable https://github.com/flutter/flutter.git "%LOCAL_FLUTTER_ROOT%"
+if errorlevel 1 (
+    if exist "%LOCAL_FLUTTER_ROOT%\bin\flutter.bat" (
+        set "FLUTTER_ROOT=%LOCAL_FLUTTER_ROOT%"
+        goto :FlutterFound
+    )
+    echo ERROR: Failed to clone Flutter into "%LOCAL_FLUTTER_ROOT%".
+    exit /b 1
+)
+
+if exist "%LOCAL_FLUTTER_ROOT%\bin\flutter.bat" (
+    set "FLUTTER_ROOT=%LOCAL_FLUTTER_ROOT%"
+    goto :FlutterFound
+)
+
+echo Install Flutter from https://docs.flutter.dev/get-started/install/windows
+echo or set FLUTTER_ROOT to your Flutter SDK root.
+exit /b 1
+
+:FlutterFound
+for %%I in ("%FLUTTER_ROOT%") do set "FLUTTER_ROOT=%%~fI"
+set "FLUTTER_CMD=%FLUTTER_ROOT%\bin\flutter.bat"
+set "DART_CMD=%FLUTTER_ROOT%\bin\dart.bat"
+set "PATH=%FLUTTER_ROOT%\bin;%PATH%"
+exit /b 0
+
+:CheckDeveloperMode
+set "SYMLINK_TEST=%TEMP%\stockcalc_symlink_test_%RANDOM%.tmp"
+set "SYMLINK_LINK=%TEMP%\stockcalc_symlink_link_%RANDOM%.tmp"
+>"%SYMLINK_TEST%" echo test
+mklink "%SYMLINK_LINK%" "%SYMLINK_TEST%" >nul 2>&1
+if errorlevel 1 (
+    del "%SYMLINK_TEST%" >nul 2>&1
+    echo ERROR: Windows symlink support is required for Flutter plugin builds.
+    echo Enable Developer Mode: start ms-settings:developers
+    echo Then turn on Developer Mode and rerun this script.
+    exit /b 1
+)
+del "%SYMLINK_LINK%" >nul 2>&1
+del "%SYMLINK_TEST%" >nul 2>&1
+exit /b 0

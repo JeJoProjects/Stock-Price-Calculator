@@ -48,6 +48,7 @@ dist/
 
 # === App ===
 stockcalc_settings.json
+external/
 
 # === OS ===
 Thumbs.db
