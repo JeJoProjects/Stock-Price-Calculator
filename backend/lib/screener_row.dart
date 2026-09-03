@@ -1,5 +1,7 @@
-/// Client-side mirror of backend/lib/screener_row.dart's ScreenerRow,
-/// decoded from the /screener/top JSON response.
+/// The shared screener row shape served over /screener/top. Filtering and
+/// sorting both happen on Finviz's side now (see finviz_client.dart) - this
+/// is purely the wire format, not a place to re-filter what Finviz already
+/// decided belongs on the "unusual volume" screen.
 library;
 
 class ScreenerRow {
@@ -33,19 +35,15 @@ class ScreenerRow {
         changePercent: (json['changePercent'] as num).toDouble(),
         volume: (json['volume'] as num).toDouble(),
       );
-}
 
-class ScreenerSnapshot {
-  final List<ScreenerRow> rows;
-  final DateTime? lastUpdated;
-  final String? error;
-
-  const ScreenerSnapshot({this.rows = const [], this.lastUpdated, this.error});
-
-  factory ScreenerSnapshot.fromJson(Map<String, dynamic> json) => ScreenerSnapshot(
-        rows: (json['rows'] as List).map((r) => ScreenerRow.fromJson(r)).toList(),
-        lastUpdated:
-            json['lastUpdated'] != null ? DateTime.tryParse(json['lastUpdated'] as String) : null,
-        error: json['error'] as String?,
-      );
+  Map<String, dynamic> toJson() => {
+        'symbol': symbol,
+        'name': name,
+        'exchange': exchange,
+        'sector': sector,
+        'marketCap': marketCap,
+        'price': price,
+        'changePercent': changePercent,
+        'volume': volume,
+      };
 }

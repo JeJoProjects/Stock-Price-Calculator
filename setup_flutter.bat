@@ -7,11 +7,11 @@ rem This is the repo setup entrypoint for the Flutter-only app.
 call :ResolveFlutterSdk
 if errorlevel 1 goto :Error
 
-echo [1/4] Checking for Flutter SDK...
+echo [1/5] Checking for Flutter SDK...
 echo Using Flutter SDK at "%FLUTTER_ROOT%"
 echo.
 
-echo [2/4] Running flutter doctor ^(checks the Windows desktop toolchain^)...
+echo [2/5] Running flutter doctor ^(checks the Windows desktop toolchain^)...
 call "%FLUTTER_CMD%" config --enable-windows-desktop
 call "%FLUTTER_CMD%" doctor
 echo.
@@ -22,7 +22,7 @@ echo above, install it before continuing: https://visualstudio.microsoft.com/dow
 call :CheckDeveloperMode
 if errorlevel 1 goto :Error
 
-echo [3/4] Fetching backend dependencies...
+echo [3/5] Fetching backend dependencies...
 pushd backend
 call "%DART_CMD%" pub get
 if errorlevel 1 (
@@ -33,7 +33,7 @@ if errorlevel 1 (
 )
 popd
 
-echo [4/4] Fetching app dependencies and building for Windows...
+echo [4/5] Fetching app dependencies and building for Windows...
 if not exist "app\assets\data" mkdir "app\assets\data"
 copy /Y "data\us_tickers_full.json" "app\assets\data\us_tickers_full.json" >nul
 if errorlevel 1 (
@@ -58,11 +58,27 @@ if errorlevel 1 (
 )
 popd
 
+echo [5/5] Compiling backend into the app's Release folder...
+if not exist "app\build\windows\x64\runner\Release\backend" mkdir "app\build\windows\x64\runner\Release\backend"
+pushd backend
+call "%DART_CMD%" compile exe bin\server.dart -o "..\app\build\windows\x64\runner\Release\backend\stockcalc_backend.exe"
+if errorlevel 1 (
+    echo ERROR: dart compile exe failed in backend\.
+    popd
+    pause
+    exit /b 1
+)
+popd
+
 echo.
 echo Build complete: app\build\windows\x64\runner\Release\stockcalc.exe
-echo Set FINNHUB_API_KEY before starting backend\bin\server.dart to enable
-echo live quotes, charts, and the micro-cap screener.
-echo Run run_flutter.bat to launch the app.
+echo stockcalc.exe now starts and stops the bundled backend automatically -
+echo just double-click it, no separate server step needed.
+echo Set FINNHUB_API_KEY as a persistent environment variable ^(setx
+echo FINNHUB_API_KEY "..."^) to enable live quotes, charts, and the
+echo micro-cap screener - a session-only value won't be picked up when
+echo launching the exe directly from Explorer.
+echo Run run_flutter.bat any time you want an incremental rebuild + launch.
 endlocal
 exit /b 0
 

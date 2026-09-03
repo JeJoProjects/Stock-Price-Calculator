@@ -6,9 +6,9 @@ import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'package:backend/finnhub_client.dart';
+import 'package:backend/finviz_client.dart';
+import 'package:backend/finviz_screener_service.dart';
 import 'package:backend/market_types.dart';
-import 'package:backend/screener_criteria.dart';
-import 'package:backend/screener_isolate.dart';
 import 'package:backend/symbol_search.dart';
 
 Response _json(Object body, {int status = 200}) => Response(
@@ -26,13 +26,20 @@ void main(List<String> args) async {
 
   final client = FinnhubClient(apiKey: apiKey);
   final symbolSearch = SymbolSearchClient();
-  final screener = ScreenerIsolateRunner();
-  if (client.hasApiKey) {
-    await screener.start(
-      apiKey: apiKey,
-      criteria: const ScreenerCriteria(maxMarketCap: 500e6, minChangePercent: 10.0),
-    );
-  }
+
+  // Micro-Cap Movers is fed straight from Finviz's free screener page
+  // (finviz_client.dart) - no account or key needed, unlike Finnhub above.
+  final finvizClient = FinvizClient();
+  // How often the backend re-fetches Finviz's screener page - the app's
+  // Settings > Display "Movers Refresh" control only governs how often the
+  // app re-fetches this already-computed, cached result, not how often the
+  // backend talks to Finviz.
+  final pollSeconds = int.tryParse(Platform.environment['SCREENER_POLL_SECONDS'] ?? '') ?? 30;
+  final screener = FinvizScreenerService(
+    client: finvizClient,
+    pollInterval: Duration(seconds: pollSeconds),
+  );
+  screener.start();
 
   final router = Router()
     ..get('/health', (Request req) => _json({'status': 'ok'}))

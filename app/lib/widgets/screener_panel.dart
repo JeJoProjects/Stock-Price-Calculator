@@ -4,10 +4,12 @@ import '../screener/screener_client.dart';
 import '../screener/screener_models.dart';
 import '../theme/app_theme.dart';
 
-/// New feature (not in the old app): a live micro-cap / unusual-move
-/// screener, replicating the Finviz "unusual volume" view the user wants
-/// (market cap < $500M, large % move), backed by the Dart server's
-/// /screener/top endpoint rather than scraping Finviz directly.
+/// New feature (not in the old app): a live "unusual volume" movers list,
+/// mirroring https://finviz.com/screener?v=111&s=ta_unusualvolume&o=-change
+/// exactly - the backend's /screener/top endpoint is fed by parsing that
+/// free Finviz page directly (see backend/lib/finviz_client.dart), not a
+/// Finnhub approximation, so there's no market-cap ceiling here despite the
+/// panel's name; it shows whatever that Finviz screen shows.
 ///
 /// Status (gain/loss) is never color-alone here - every colored value pairs
 /// with an up/down icon, per the app's own accessibility bar for status
@@ -95,7 +97,7 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
                     style: TextStyle(
                         color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15)),
                 Text(
-                  'Unusual moves under \$500M',
+                  'Live from Finviz • unusual volume',
                   style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),
                 ),
               ],
@@ -150,7 +152,7 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
       return _emptyState(
         icon: Icons.search_off_rounded,
         title: 'No movers right now',
-        subtitle: 'Nothing under \$500M cap has moved enough to qualify.',
+        subtitle: 'Finviz isn\'t showing any unusual-volume movers at the moment.',
         iconColor: AppColors.textMuted,
       );
     }
@@ -242,12 +244,14 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
                                 fontFamily: 'Consolas',
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13)),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(row.exchange,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
-                        ),
+                        if (row.exchange.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(row.exchange,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 2),
@@ -255,7 +259,15 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
                     const SizedBox(height: 4),
-                    _capChip(row.marketCap),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: [
+                        if (row.marketCap > 0) _capChip(row.marketCap),
+                        _volumeChip(row.volume),
+                        if (row.sector.isNotEmpty) _sectorChip(row.sector),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -321,14 +333,22 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
     );
   }
 
-  Widget _capChip(double marketCap) {
+  Widget _capChip(double marketCap) => _chip('Cap ${formatCompactMarketCap(marketCap)}');
+
+  Widget _volumeChip(double volume) => _chip('Vol ${formatCompactVolume(volume)}');
+
+  Widget _sectorChip(String sector) =>
+      ConstrainedBox(constraints: const BoxConstraints(maxWidth: 110), child: _chip(sector));
+
+  Widget _chip(String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: AppColors.bgInput,
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text('Cap ${formatCompactMarketCap(marketCap)}',
+      child: Text(label,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
     );
   }

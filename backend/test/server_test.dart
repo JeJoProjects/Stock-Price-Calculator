@@ -26,7 +26,7 @@ void main() {
     expect(jsonDecode(response.body), {'status': 'ok'});
   });
 
-  test('Screener endpoint responds even with no API key configured', () async {
+  test('Screener endpoint responds immediately, before the first Finviz poll completes', () async {
     final response = await get(Uri.parse('$host/screener/top'));
     expect(response.statusCode, 200);
     final body = jsonDecode(response.body) as Map<String, dynamic>;

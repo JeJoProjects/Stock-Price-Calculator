@@ -28,6 +28,7 @@ class _PreferencesContentState extends State<_PreferencesContent> {
   late int _maxSearchResults = widget.initial.maxSearchResults;
   late bool _showExchangeBadges = widget.initial.showExchangeBadges;
   late bool _showStatsBar = widget.initial.showStatsBar;
+  late int _screenerRefreshSeconds = widget.initial.screenerRefreshSeconds;
 
   void _apply() {
     Navigator.of(context).pop(AppSettings(
@@ -35,6 +36,7 @@ class _PreferencesContentState extends State<_PreferencesContent> {
       maxSearchResults: _maxSearchResults,
       showExchangeBadges: _showExchangeBadges,
       showStatsBar: _showStatsBar,
+      screenerRefreshSeconds: _screenerRefreshSeconds,
     ));
   }
 
@@ -128,9 +130,33 @@ class _PreferencesContentState extends State<_PreferencesContent> {
             value: _showStatsBar,
             onChanged: (v) => setState(() => _showStatsBar = v),
           ),
+          const SizedBox(height: 16),
+          Text('Micro-Cap Movers Refresh (${_formatRefreshInterval(_screenerRefreshSeconds)})',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          Slider(
+            value: _screenerRefreshSeconds.toDouble(),
+            min: 10,
+            max: 300,
+            divisions: 29,
+            onChanged: (v) => setState(() => _screenerRefreshSeconds = v.round()),
+          ),
+          const Text(
+            'How often the app re-checks the movers list. The underlying '
+            'data itself refreshes on the backend\'s own schedule (30s by '
+            'default), so setting this below that just re-fetches the same '
+            'cached snapshot sooner.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10.5, height: 1.4),
+          ),
         ],
       ),
     );
+  }
+
+  String _formatRefreshInterval(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    final minutes = seconds ~/ 60;
+    final remainder = seconds % 60;
+    return remainder == 0 ? '${minutes}m' : '${minutes}m ${remainder}s';
   }
 
   Widget _finnhubTab() {

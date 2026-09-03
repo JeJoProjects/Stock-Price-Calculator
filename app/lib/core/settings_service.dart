@@ -11,6 +11,7 @@ class AppSettings {
   int maxSearchResults;
   bool showExchangeBadges;
   bool showStatsBar;
+  int screenerRefreshSeconds;
   double windowWidth;
   double windowHeight;
   double? windowX;
@@ -21,6 +22,7 @@ class AppSettings {
     this.maxSearchResults = 12,
     this.showExchangeBadges = true,
     this.showStatsBar = true,
+    this.screenerRefreshSeconds = 30,
     this.windowWidth = 1600,
     this.windowHeight = 900,
     this.windowX,
@@ -33,6 +35,7 @@ class SettingsService {
   static const _kMaxSearchResults = 'maxSearchResults';
   static const _kShowExchangeBadges = 'showExchangeBadges';
   static const _kShowStatsBar = 'showStatsBar';
+  static const _kScreenerRefreshSeconds = 'screenerRefreshSeconds';
   static const _kWindowWidth = 'windowWidth';
   static const _kWindowHeight = 'windowHeight';
   static const _kWindowX = 'windowX';
@@ -45,6 +48,7 @@ class SettingsService {
       maxSearchResults: prefs.getInt(_kMaxSearchResults) ?? 12,
       showExchangeBadges: prefs.getBool(_kShowExchangeBadges) ?? true,
       showStatsBar: prefs.getBool(_kShowStatsBar) ?? true,
+      screenerRefreshSeconds: prefs.getInt(_kScreenerRefreshSeconds) ?? 30,
       windowWidth: prefs.getDouble(_kWindowWidth) ?? 1600,
       windowHeight: prefs.getDouble(_kWindowHeight) ?? 900,
       windowX: prefs.getDouble(_kWindowX),
@@ -58,6 +62,7 @@ class SettingsService {
     await prefs.setInt(_kMaxSearchResults, settings.maxSearchResults);
     await prefs.setBool(_kShowExchangeBadges, settings.showExchangeBadges);
     await prefs.setBool(_kShowStatsBar, settings.showStatsBar);
+    await prefs.setInt(_kScreenerRefreshSeconds, settings.screenerRefreshSeconds);
     await prefs.setDouble(_kWindowWidth, settings.windowWidth);
     await prefs.setDouble(_kWindowHeight, settings.windowHeight);
     if (settings.windowX != null) await prefs.setDouble(_kWindowX, settings.windowX!);

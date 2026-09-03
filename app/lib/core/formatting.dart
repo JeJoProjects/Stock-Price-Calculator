@@ -43,3 +43,14 @@ String formatCompactMarketCap(double v) {
   if (v >= 1e6) return '\$${(v / 1e6).toStringAsFixed(2)}M';
   return formatCurrency(v);
 }
+
+/// Share volume, compact (e.g. 1.2M, 845.0K). Zero (or missing, when
+/// Finnhub's candle endpoint isn't available on the current plan) renders
+/// as an em-dash rather than "0", per the app's zero-value convention.
+String formatCompactVolume(double v) {
+  if (v <= 0) return '—';
+  if (v >= 1e9) return '${(v / 1e9).toStringAsFixed(2)}B';
+  if (v >= 1e6) return '${(v / 1e6).toStringAsFixed(2)}M';
+  if (v >= 1e3) return '${(v / 1e3).toStringAsFixed(1)}K';
+  return v.toStringAsFixed(0);
+}

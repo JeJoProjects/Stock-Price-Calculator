@@ -11,7 +11,7 @@ import 'screener_models.dart';
 
 class ScreenerClient {
   final String baseUrl;
-  final Duration pollInterval;
+  Duration pollInterval;
   final http.Client _http;
   Timer? _timer;
   final _controller = StreamController<ScreenerSnapshot>.broadcast();
@@ -31,6 +31,19 @@ class ScreenerClient {
 
   void stop() {
     _timer?.cancel();
+  }
+
+  /// Applies a new refresh cadence (from Preferences > Display) without
+  /// tearing down and recreating the client - this only changes how often
+  /// the app re-fetches the backend's already-cached /screener/top result,
+  /// not how often the backend itself polls Finnhub.
+  void setPollInterval(Duration interval) {
+    if (interval == pollInterval) return;
+    pollInterval = interval;
+    if (_timer != null) {
+      _timer!.cancel();
+      _timer = Timer.periodic(pollInterval, (_) => _fetchOnce());
+    }
   }
 
   Future<void> _fetchOnce() async {

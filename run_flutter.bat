@@ -18,11 +18,19 @@ if %DO_CLEAN%==1 (
     popd
 )
 
-echo [1/3] Fetching backend dependencies...
+echo [1/3] Building backend...
 pushd backend
 call "%DART_CMD%" pub get
 if errorlevel 1 (
     echo ERROR: dart pub get failed in backend\.
+    popd
+    pause
+    exit /b 1
+)
+if not exist "..\app\build\windows\x64\runner\Release\backend" mkdir "..\app\build\windows\x64\runner\Release\backend"
+call "%DART_CMD%" compile exe bin\server.dart -o "..\app\build\windows\x64\runner\Release\backend\stockcalc_backend.exe"
+if errorlevel 1 (
+    echo ERROR: dart compile exe failed in backend\.
     popd
     pause
     exit /b 1
@@ -59,14 +67,17 @@ if not exist "app\build\windows\x64\runner\Release\stockcalc.exe" (
     exit /b 1
 )
 
-echo [3/3] Starting backend and launching app...
+echo [3/3] Launching app...
+rem The app starts the bundled backend exe itself (see
+rem app/lib/core/backend_launcher.dart) and stops it again on close, so
+rem there's no separate server process to start/stop by hand anymore.
 if "%FINNHUB_API_KEY%"=="" (
-    echo NOTE: FINNHUB_API_KEY is not set - quotes, charts, and the screener
-    echo will be unavailable until it is. Set it and re-run to enable them.
+    echo NOTE: FINNHUB_API_KEY is not set for this session - quotes, charts,
+    echo and the screener will be unavailable until it is. Set it as a
+    echo persistent environment variable ^(setx FINNHUB_API_KEY "..."^) so it's
+    echo picked up even when launching stockcalc.exe directly, not just from
+    echo this script.
 )
-pushd backend
-start "StockCalc Backend" /min "%DART_CMD%" run bin\server.dart
-popd
 start "" "app\build\windows\x64\runner\Release\stockcalc.exe"
 
 endlocal

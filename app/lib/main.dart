@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
+import 'core/backend_launcher.dart';
 import 'core/calc_engine.dart';
 import 'core/formatting.dart';
 import 'core/panel_state.dart';
@@ -81,6 +82,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
   final _searchFocusNode = FocusNode();
   final _screenerClient = ScreenerClient();
   final _marketClient = MarketDataService();
+  final _backendLauncher = BackendLauncher();
   final _settingsService = SettingsService();
   AppSettings _settings = AppSettings();
   String? _chartSymbol;
@@ -93,13 +95,27 @@ class _HomePageState extends State<HomePage> with WindowListener {
     super.initState();
     _addPanel();
     _loadSearchEngine();
-    if (_isDesktop) windowManager.addListener(this);
+    if (_isDesktop) {
+      windowManager.addListener(this);
+      // Intercept the close button so onWindowClose can stop the backend
+      // we launched before the window actually goes away, instead of
+      // leaving it running as an orphaned process.
+      windowManager.setPreventClose(true);
+      _backendLauncher.ensureRunning();
+    }
     _loadSettings();
+  }
+
+  @override
+  void onWindowClose() async {
+    _backendLauncher.stopIfOwned();
+    await windowManager.destroy();
   }
 
   Future<void> _loadSettings() async {
     final settings = await _settingsService.load();
     setState(() => _settings = settings);
+    _screenerClient.setPollInterval(Duration(seconds: settings.screenerRefreshSeconds));
   }
 
   /// Ported from main.cpp's saveSettings-on-shutdown, but continuous
@@ -136,6 +152,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
     if (result != null) {
       setState(() => _settings = result);
       await _settingsService.save(result);
+      _screenerClient.setPollInterval(Duration(seconds: result.screenerRefreshSeconds));
     }
   }
 
@@ -298,6 +315,14 @@ class _HomePageState extends State<HomePage> with WindowListener {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Micro-Cap Movers gets its own full-height column on
+                    // the left, like a watchlist rail, rather than sharing
+                    // the right sidebar with the chart.
+                    Container(
+                      width: 320,
+                      margin: const EdgeInsets.only(right: kPanelSpacing),
+                      child: ScreenerPanel(client: _screenerClient, onSelect: _applyScreenerRow),
+                    ),
                     // Centered, wrapping layout: with few panels the group
                     // sits in the visual middle of the area (reads as
                     // intentional) rather than pinned top-left with a huge
@@ -341,24 +366,11 @@ class _HomePageState extends State<HomePage> with WindowListener {
                     Container(
                       width: 340,
                       margin: const EdgeInsets.only(left: kPanelSpacing),
-                      child: Column(
-                        children: [
-                          // Market View gets the larger share of the column.
-                          Expanded(
-                            flex: 2,
-                            child: ChartPane(
-                              symbol: _chartSymbol,
-                              companyName: _chartCompany,
-                              exchange: _chartExchange,
-                              client: _marketClient,
-                            ),
-                          ),
-                          const SizedBox(height: kPanelSpacing),
-                          Expanded(
-                            flex: 1,
-                            child: ScreenerPanel(client: _screenerClient, onSelect: _applyScreenerRow),
-                          ),
-                        ],
+                      child: ChartPane(
+                        symbol: _chartSymbol,
+                        companyName: _chartCompany,
+                        exchange: _chartExchange,
+                        client: _marketClient,
                       ),
                     ),
                   ],
@@ -413,6 +425,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
     _searchFocusNode.dispose();
     _screenerClient.dispose();
     _marketClient.close();
+    _backendLauncher.stopIfOwned();
     super.dispose();
   }
 }
