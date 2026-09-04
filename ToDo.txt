@@ -1,0 +1,18 @@
+Working tree is clean now. Pulling origin/develop.
+
+  Ran 1 shell command
+
+Local develop is now fast-forwarded to origin exactly, working tree clean and matching origin 1:1.
+
+Summary of what happened and why:
+- Local had uncommitted working-tree changes that were a WIP alternate rework of the screener (Yahoo Finance-based, no API key, no backend isolate).
+- Origin's newest commit (89edebc) had already solved the same problem, more completely — Finviz-based screener, self-launching backend, plus preferences/UI updates and new tests.
+- Reapplying your local WIP on top would have collided with and effectively reverted origin's working solution, which you explicitly didn't want.
+- I stashed the local WIP (not deleted) rather than discarding it, then fast-forward pulled. Working tree is now clean and identical to origin.
+
+The stash is preserved as stash@{0}: "WIP: Yahoo-based screener rework (superseded by origin 89edebc Finviz rework)" in case you want to look at it later — it's not applied to the working tree. Let me know if you want me to drop it or you'd rather keep it around.
+
+✻ Cogitated for 1m 4s · done 12:17 AM
+
+※ recap: Pulled origin's latest screener rework (Finviz-based) into develop after safely stashing your conflicting local WIP; repo is now clean and matches origin. Next: let me know if you want that old stash dropped or kept. (disable recaps in /config)
+                                                                                             ✔ Update installed · Restart to up
