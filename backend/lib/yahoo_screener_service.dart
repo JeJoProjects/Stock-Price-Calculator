@@ -1,20 +1,14 @@
-/// Polls Finviz's screener page on an interval and caches the result, so
-/// many app instances can share one poller without multiplying Finviz
-/// requests - same one-poller-many-clients shape as the old Finnhub-based
-/// screener.
-///
-/// Unlike the Finnhub version this replaced, there's no isolate here: one
-/// page fetch per cycle is a single lightweight HTTP call, not a loop of
-/// dozens of rate-limited requests, so it doesn't need its own isolate to
-/// avoid blocking the HTTP server.
+/// Polls Yahoo Finance's day-gainers screener on an interval and caches the
+/// result - the exact same single-poller-many-clients shape as
+/// finviz_screener_service.dart, just pointed at a different source.
 library;
 
 import 'dart:async';
-import 'finviz_client.dart';
+import 'yahoo_client.dart';
 import 'screener_row.dart';
 
-class FinvizScreenerService {
-  final FinvizClient client;
+class YahooScreenerService {
+  final YahooClient client;
   final Duration pollInterval;
   final int limit;
   final void Function(List<ScreenerRow> rows, DateTime updatedAt, String? error)? onUpdate;
@@ -25,10 +19,10 @@ class FinvizScreenerService {
   bool _polling = false;
   Timer? _timer;
 
-  FinvizScreenerService({
+  YahooScreenerService({
     required this.client,
     this.pollInterval = const Duration(seconds: 30),
-    this.limit = 20, // fetchUnusualVolumeMovers only pulls page 1 (top 20)
+    this.limit = 25, // fetchTopGainers already caps at 25 (count=25)
     this.onUpdate,
   });
 
@@ -47,24 +41,24 @@ class FinvizScreenerService {
     if (_polling) return;
     _polling = true;
     try {
-      final rows = await client.fetchUnusualVolumeMovers();
+      final rows = await client.fetchTopGainers();
       _latest = rows
           .take(limit)
           .map((r) => ScreenerRow(
                 symbol: r.symbol,
                 name: r.company,
-                sector: r.sector,
+                exchange: r.exchange,
                 marketCap: r.marketCap,
                 price: r.price,
                 changePercent: r.changePercent,
                 volume: r.volume,
-                source: 'finviz',
+                source: 'yahoo',
               ))
           .toList();
       _lastUpdated = DateTime.now();
       _lastError = null;
     } catch (e) {
-      _lastError = 'Finviz poll failed: $e';
+      _lastError = 'Yahoo poll failed: $e';
     } finally {
       _polling = false;
       onUpdate?.call(_latest, _lastUpdated ?? DateTime.now(), _lastError);

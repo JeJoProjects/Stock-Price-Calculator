@@ -12,6 +12,7 @@ class AppSettings {
   bool showExchangeBadges;
   bool showStatsBar;
   int screenerRefreshSeconds;
+  double screenerPanelWidth;
   double windowWidth;
   double windowHeight;
   double? windowX;
@@ -23,6 +24,7 @@ class AppSettings {
     this.showExchangeBadges = true,
     this.showStatsBar = true,
     this.screenerRefreshSeconds = 30,
+    this.screenerPanelWidth = 400,
     this.windowWidth = 1600,
     this.windowHeight = 900,
     this.windowX,
@@ -36,6 +38,7 @@ class SettingsService {
   static const _kShowExchangeBadges = 'showExchangeBadges';
   static const _kShowStatsBar = 'showStatsBar';
   static const _kScreenerRefreshSeconds = 'screenerRefreshSeconds';
+  static const _kScreenerPanelWidth = 'screenerPanelWidth';
   static const _kWindowWidth = 'windowWidth';
   static const _kWindowHeight = 'windowHeight';
   static const _kWindowX = 'windowX';
@@ -49,6 +52,7 @@ class SettingsService {
       showExchangeBadges: prefs.getBool(_kShowExchangeBadges) ?? true,
       showStatsBar: prefs.getBool(_kShowStatsBar) ?? true,
       screenerRefreshSeconds: prefs.getInt(_kScreenerRefreshSeconds) ?? 30,
+      screenerPanelWidth: prefs.getDouble(_kScreenerPanelWidth) ?? 400,
       windowWidth: prefs.getDouble(_kWindowWidth) ?? 1600,
       windowHeight: prefs.getDouble(_kWindowHeight) ?? 900,
       windowX: prefs.getDouble(_kWindowX),
@@ -63,6 +67,7 @@ class SettingsService {
     await prefs.setBool(_kShowExchangeBadges, settings.showExchangeBadges);
     await prefs.setBool(_kShowStatsBar, settings.showStatsBar);
     await prefs.setInt(_kScreenerRefreshSeconds, settings.screenerRefreshSeconds);
+    await prefs.setDouble(_kScreenerPanelWidth, settings.screenerPanelWidth);
     await prefs.setDouble(_kWindowWidth, settings.windowWidth);
     await prefs.setDouble(_kWindowHeight, settings.windowHeight);
     if (settings.windowX != null) await prefs.setDouble(_kWindowX, settings.windowX!);

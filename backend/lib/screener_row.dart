@@ -1,7 +1,8 @@
-/// The shared screener row shape served over /screener/top. Filtering and
-/// sorting both happen on Finviz's side now (see finviz_client.dart) - this
-/// is purely the wire format, not a place to re-filter what Finviz already
-/// decided belongs on the "unusual volume" screen.
+/// The shared screener row shape served over /screener/finviz, /screener/yahoo
+/// and /screener/combined. Filtering and sorting happen on each source's side
+/// (see finviz_client.dart / yahoo_client.dart) - this is purely the wire
+/// format, not a place to re-filter what a source already decided belongs on
+/// its movers screen.
 library;
 
 class ScreenerRow {
@@ -13,6 +14,10 @@ class ScreenerRow {
   final double price;
   final double changePercent;
   final double volume;
+  // Which source(s) this row came from: 'finviz', 'yahoo', or 'both' for the
+  // /screener/combined intersection. Defaults to '' so existing call sites
+  // that don't set it (if any) still compile.
+  final String source;
 
   const ScreenerRow({
     required this.symbol,
@@ -23,6 +28,7 @@ class ScreenerRow {
     required this.price,
     required this.changePercent,
     required this.volume,
+    this.source = '',
   });
 
   factory ScreenerRow.fromJson(Map<String, dynamic> json) => ScreenerRow(
@@ -34,6 +40,7 @@ class ScreenerRow {
         price: (json['price'] as num).toDouble(),
         changePercent: (json['changePercent'] as num).toDouble(),
         volume: (json['volume'] as num).toDouble(),
+        source: json['source'] as String? ?? '',
       );
 
   Map<String, dynamic> toJson() => {
@@ -45,5 +52,6 @@ class ScreenerRow {
         'price': price,
         'changePercent': changePercent,
         'volume': volume,
+        'source': source,
       };
 }

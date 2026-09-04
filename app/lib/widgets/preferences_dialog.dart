@@ -131,7 +131,7 @@ class _PreferencesContentState extends State<_PreferencesContent> {
             onChanged: (v) => setState(() => _showStatsBar = v),
           ),
           const SizedBox(height: 16),
-          Text('Micro-Cap Movers Refresh (${_formatRefreshInterval(_screenerRefreshSeconds)})',
+          Text('Screener Refresh (${_formatRefreshInterval(_screenerRefreshSeconds)})',
               style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
           Slider(
             value: _screenerRefreshSeconds.toDouble(),
@@ -141,10 +141,10 @@ class _PreferencesContentState extends State<_PreferencesContent> {
             onChanged: (v) => setState(() => _screenerRefreshSeconds = v.round()),
           ),
           const Text(
-            'How often the app re-checks the movers list. The underlying '
-            'data itself refreshes on the backend\'s own schedule (30s by '
-            'default), so setting this below that just re-fetches the same '
-            'cached snapshot sooner.',
+            'How often the app re-checks the Finviz, Yahoo, and Combined '
+            'screener tabs. The underlying data itself refreshes on the '
+            'backend\'s own schedule (30s by default), so setting this below '
+            'that just re-fetches the same cached snapshot sooner.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 10.5, height: 1.4),
           ),
         ],

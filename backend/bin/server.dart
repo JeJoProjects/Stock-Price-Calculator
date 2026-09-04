@@ -9,7 +9,10 @@ import 'package:backend/finnhub_client.dart';
 import 'package:backend/finviz_client.dart';
 import 'package:backend/finviz_screener_service.dart';
 import 'package:backend/market_types.dart';
+import 'package:backend/screener_row.dart';
 import 'package:backend/symbol_search.dart';
+import 'package:backend/yahoo_client.dart';
+import 'package:backend/yahoo_screener_service.dart';
 
 Response _json(Object body, {int status = 200}) => Response(
       status,
@@ -27,19 +30,26 @@ void main(List<String> args) async {
   final client = FinnhubClient(apiKey: apiKey);
   final symbolSearch = SymbolSearchClient();
 
-  // Micro-Cap Movers is fed straight from Finviz's free screener page
-  // (finviz_client.dart) - no account or key needed, unlike Finnhub above.
+  // The screener panel is fed straight from Finviz's and Yahoo's free
+  // screener pages/APIs (finviz_client.dart, yahoo_client.dart) - no account
+  // or key needed, unlike Finnhub above.
   final finvizClient = FinvizClient();
-  // How often the backend re-fetches Finviz's screener page - the app's
-  // Settings > Display "Movers Refresh" control only governs how often the
-  // app re-fetches this already-computed, cached result, not how often the
-  // backend talks to Finviz.
+  final yahooClient = YahooClient();
+  // How often the backend re-fetches each source - the app's Settings >
+  // Display "Screener Refresh" control only governs how often the app
+  // re-fetches these already-computed, cached results, not how often the
+  // backend talks to Finviz/Yahoo.
   final pollSeconds = int.tryParse(Platform.environment['SCREENER_POLL_SECONDS'] ?? '') ?? 30;
-  final screener = FinvizScreenerService(
+  final finvizScreener = FinvizScreenerService(
     client: finvizClient,
     pollInterval: Duration(seconds: pollSeconds),
   );
-  screener.start();
+  finvizScreener.start();
+  final yahooScreener = YahooScreenerService(
+    client: yahooClient,
+    pollInterval: Duration(seconds: pollSeconds),
+  );
+  yahooScreener.start();
 
   final router = Router()
     ..get('/health', (Request req) => _json({'status': 'ok'}))
@@ -67,11 +77,56 @@ void main(List<String> args) async {
       final results = await symbolSearch.search(q, maxResults: maxResults);
       return _json({'results': results.map((r) => r.toJson()).toList()});
     })
-    ..get('/screener/top', (Request req) {
+    ..get('/screener/finviz', (Request req) {
       return _json({
-        'rows': screener.latest.map((r) => r.toJson()).toList(),
-        'lastUpdated': screener.lastUpdated?.toIso8601String(),
-        'error': screener.lastError,
+        'rows': finvizScreener.latest.map((r) => r.toJson()).toList(),
+        'lastUpdated': finvizScreener.lastUpdated?.toIso8601String(),
+        'error': finvizScreener.lastError,
+      });
+    })
+    ..get('/screener/yahoo', (Request req) {
+      return _json({
+        'rows': yahooScreener.latest.map((r) => r.toJson()).toList(),
+        'lastUpdated': yahooScreener.lastUpdated?.toIso8601String(),
+        'error': yahooScreener.lastError,
+      });
+    })
+    ..get('/screener/combined', (Request req) {
+      final finvizBySymbol = {for (final r in finvizScreener.latest) r.symbol: r};
+      final yahooBySymbol = {for (final r in yahooScreener.latest) r.symbol: r};
+      final commonSymbols = finvizBySymbol.keys.toSet().intersection(yahooBySymbol.keys.toSet());
+      final rows = commonSymbols.map((symbol) {
+        final f = finvizBySymbol[symbol]!;
+        final y = yahooBySymbol[symbol]!;
+        // Finviz's row is the richer one (it carries sector) so it's the
+        // base; fall back to Yahoo's fields only where Finviz left a gap.
+        return ScreenerRow(
+          symbol: symbol,
+          name: f.name.isNotEmpty ? f.name : y.name,
+          exchange: f.exchange.isNotEmpty ? f.exchange : y.exchange,
+          sector: f.sector,
+          marketCap: f.marketCap > 0 ? f.marketCap : y.marketCap,
+          price: f.price,
+          changePercent: f.changePercent,
+          volume: f.volume,
+          source: 'both',
+        );
+      }).toList()
+        ..sort((a, b) => b.changePercent.compareTo(a.changePercent));
+
+      final finvizUpdated = finvizScreener.lastUpdated;
+      final yahooUpdated = yahooScreener.lastUpdated;
+      DateTime? lastUpdated;
+      if (finvizUpdated != null && yahooUpdated != null) {
+        lastUpdated = finvizUpdated.isBefore(yahooUpdated) ? finvizUpdated : yahooUpdated;
+      } else {
+        lastUpdated = finvizUpdated ?? yahooUpdated;
+      }
+
+      return _json({
+        'rows': rows.map((r) => r.toJson()).toList(),
+        'lastUpdated': lastUpdated?.toIso8601String(),
+        'error': finvizScreener.lastError ?? yahooScreener.lastError,
       });
     });
 

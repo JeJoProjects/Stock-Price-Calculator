@@ -26,8 +26,22 @@ void main() {
     expect(jsonDecode(response.body), {'status': 'ok'});
   });
 
-  test('Screener endpoint responds immediately, before the first Finviz poll completes', () async {
-    final response = await get(Uri.parse('$host/screener/top'));
+  test('Finviz screener endpoint responds immediately, before the first poll completes', () async {
+    final response = await get(Uri.parse('$host/screener/finviz'));
+    expect(response.statusCode, 200);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    expect(body['rows'], isEmpty);
+  });
+
+  test('Yahoo screener endpoint responds immediately, before the first poll completes', () async {
+    final response = await get(Uri.parse('$host/screener/yahoo'));
+    expect(response.statusCode, 200);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    expect(body['rows'], isEmpty);
+  });
+
+  test('Combined screener endpoint responds immediately with an empty intersection', () async {
+    final response = await get(Uri.parse('$host/screener/combined'));
     expect(response.statusCode, 200);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     expect(body['rows'], isEmpty);

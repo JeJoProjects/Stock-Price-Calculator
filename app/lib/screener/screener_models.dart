@@ -11,6 +11,8 @@ class ScreenerRow {
   final double price;
   final double changePercent;
   final double volume;
+  // 'finviz', 'yahoo', or 'both' (only set on the /screener/combined tab).
+  final String source;
 
   const ScreenerRow({
     required this.symbol,
@@ -21,6 +23,7 @@ class ScreenerRow {
     required this.price,
     required this.changePercent,
     required this.volume,
+    this.source = '',
   });
 
   factory ScreenerRow.fromJson(Map<String, dynamic> json) => ScreenerRow(
@@ -32,6 +35,7 @@ class ScreenerRow {
         price: (json['price'] as num).toDouble(),
         changePercent: (json['changePercent'] as num).toDouble(),
         volume: (json['volume'] as num).toDouble(),
+        source: json['source'] as String? ?? '',
       );
 }
 

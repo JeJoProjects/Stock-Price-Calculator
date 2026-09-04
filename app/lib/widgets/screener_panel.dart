@@ -1,49 +1,92 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/formatting.dart';
 import '../screener/screener_client.dart';
+import '../screener/screener_filters.dart';
+import '../screener/screener_hub.dart';
 import '../screener/screener_models.dart';
 import '../theme/app_theme.dart';
 
-/// New feature (not in the old app): a live "unusual volume" movers list,
-/// mirroring https://finviz.com/screener?v=111&s=ta_unusualvolume&o=-change
-/// exactly - the backend's /screener/top endpoint is fed by parsing that
-/// free Finviz page directly (see backend/lib/finviz_client.dart), not a
-/// Finnhub approximation, so there's no market-cap ceiling here despite the
-/// panel's name; it shows whatever that Finviz screen shows.
+/// A live movers screener with three tabs - Finviz, Yahoo, and a Combined
+/// view of symbols appearing on both - each independently polling its own
+/// backend endpoint (see ScreenerHub) but sharing one filter bar and one
+/// status/countdown/refresh strip that always reflects the active tab.
 ///
 /// Status (gain/loss) is never color-alone here - every colored value pairs
 /// with an up/down icon, per the app's own accessibility bar for status
 /// encoding (see CombinedStatsBar / PurchasePanelCard for the same rule).
 class ScreenerPanel extends StatefulWidget {
-  final ScreenerClient client;
+  final ScreenerHub hub;
   final void Function(ScreenerRow row) onSelect;
 
-  const ScreenerPanel({super.key, required this.client, required this.onSelect});
+  const ScreenerPanel({super.key, required this.hub, required this.onSelect});
 
   @override
   State<ScreenerPanel> createState() => _ScreenerPanelState();
 }
 
-class _ScreenerPanelState extends State<ScreenerPanel> {
-  ScreenerSnapshot _snapshot = const ScreenerSnapshot();
+class _ScreenerPanelState extends State<ScreenerPanel> with SingleTickerProviderStateMixin {
+  late final TabController _tabController =
+      TabController(length: 3, vsync: this)..addListener(() => setState(() {}));
+
+  ScreenerSnapshot _finvizSnapshot = const ScreenerSnapshot();
+  ScreenerSnapshot _yahooSnapshot = const ScreenerSnapshot();
+  ScreenerSnapshot _combinedSnapshot = const ScreenerSnapshot();
+  final List<StreamSubscription<ScreenerSnapshot>> _subscriptions = [];
+
+  ScreenerFilters _filters = const ScreenerFilters();
   int? _hoveredIndex;
+  Timer? _countdownTicker;
 
   @override
   void initState() {
     super.initState();
-    widget.client.snapshots.listen((s) {
-      if (mounted) setState(() => _snapshot = s);
+    _subscriptions.add(widget.hub.finviz.snapshots.listen((s) {
+      if (mounted) setState(() => _finvizSnapshot = s);
+    }));
+    _subscriptions.add(widget.hub.yahoo.snapshots.listen((s) {
+      if (mounted) setState(() => _yahooSnapshot = s);
+    }));
+    _subscriptions.add(widget.hub.combined.snapshots.listen((s) {
+      if (mounted) setState(() => _combinedSnapshot = s);
+    }));
+    widget.hub.finviz.start();
+    widget.hub.yahoo.start();
+    widget.hub.combined.start();
+    // Ticks purely to refresh the countdown label each second - the
+    // snapshots themselves only change on an actual fetch.
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
     });
-    widget.client.start();
   }
 
   @override
   void dispose() {
-    widget.client.stop();
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    widget.hub.finviz.stop();
+    widget.hub.yahoo.stop();
+    widget.hub.combined.stop();
+    _countdownTicker?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
-  bool get _isLive => _snapshot.error == null && _snapshot.lastUpdated != null;
+  ScreenerSnapshot get _activeSnapshot =>
+      [_finvizSnapshot, _yahooSnapshot, _combinedSnapshot][_tabController.index];
+  ScreenerClient get _activeClient =>
+      [widget.hub.finviz, widget.hub.yahoo, widget.hub.combined][_tabController.index];
+  bool get _activeIsLive => _activeSnapshot.error == null && _activeSnapshot.lastUpdated != null;
+
+  /// One button refreshes every tab, not just the active one - Combined is
+  /// itself derived from Finviz+Yahoo's cached results, so refreshing all
+  /// three together is what actually gets a fresher Combined view too.
+  void _refreshAllNow() {
+    widget.hub.finviz.refreshNow();
+    widget.hub.yahoo.refreshNow();
+    widget.hub.combined.refreshNow();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,17 +100,27 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _header(),
+          _tabBar(),
           const Divider(height: 1, color: AppColors.border),
-          Expanded(child: _body()),
+          _toolbarRow(),
+          const Divider(height: 1, color: AppColors.border),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _body(_finvizSnapshot),
+                _body(_yahooSnapshot),
+                _body(_combinedSnapshot),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _header() {
+  Widget _tabBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -76,91 +129,177 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
         ),
         border: Border(top: BorderSide(color: AppColors.accentBlue, width: 2)),
       ),
+      child: TabBar(
+        controller: _tabController,
+        labelColor: AppColors.accentBlue,
+        unselectedLabelColor: AppColors.textMuted,
+        indicatorColor: AppColors.accentBlue,
+        labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+        tabs: const [Tab(text: 'Finviz'), Tab(text: 'Yahoo'), Tab(text: 'Combined')],
+      ),
+    );
+  }
+
+  Widget _toolbarRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Row(
         children: [
-          Container(
-            width: 28,
-            height: 28,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppColors.accentBlue.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.bolt_rounded, size: 16, color: AppColors.accentBlue),
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Micro-Cap Movers',
-                    style: TextStyle(
-                        color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15)),
-                Text(
-                  'Live from Finviz • unusual volume',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),
-                ),
-              ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _presetDropdown(
+                    label: 'Chg',
+                    value: _filters.minChangePercent,
+                    items: <double, String>{0: 'Any', 5: '5%+', 10: '10%+', 20: '20%+', 50: '50%+'},
+                    onChanged: (v) => setState(() => _filters = _filters.copyWith(minChangePercent: v)),
+                  ),
+                  const SizedBox(width: 6),
+                  _presetDropdown(
+                    label: 'Vol',
+                    value: _filters.minVolume,
+                    items: <double, String>{
+                      0: 'Any',
+                      100000: '100K+',
+                      500000: '500K+',
+                      1000000: '1M+',
+                      5000000: '5M+',
+                    },
+                    onChanged: (v) => setState(() => _filters = _filters.copyWith(minVolume: v)),
+                  ),
+                  const SizedBox(width: 6),
+                  _presetDropdown(
+                    label: 'Cap',
+                    value: _filters.minMarketCap,
+                    items: <double, String>{0: 'Any', 50e6: '50M+', 300e6: '300M+', 2e9: '2B+', 10e9: '10B+'},
+                    onChanged: (v) => setState(() => _filters = _filters.copyWith(minMarketCap: v)),
+                  ),
+                ],
+              ),
             ),
           ),
-          _liveBadge(),
+          const SizedBox(width: 8),
+          _statusArea(),
         ],
       ),
     );
   }
 
-  Widget _liveBadge() {
-    final label =
-        _isLive ? _relativeTime(_snapshot.lastUpdated!) : (_snapshot.error != null ? 'Error' : '—');
-    final dotColor = _isLive ? AppColors.profitGreen : AppColors.textMuted;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
+  Widget _presetDropdown({
+    required String label,
+    required double value,
+    required Map<double, String> items,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(color: AppColors.bgInput, borderRadius: BorderRadius.circular(6)),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<double>(
+          value: value,
+          isDense: true,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 11),
+          dropdownColor: AppColors.bgSecondary,
+          icon: const Icon(Icons.arrow_drop_down, size: 16, color: AppColors.textMuted),
+          items: [
+            for (final entry in items.entries)
+              DropdownMenuItem(value: entry.key, child: Text('$label ${entry.value}')),
+          ],
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ),
+    );
+  }
+
+  /// The countdown-to-next-refresh + manual refresh button, in the same
+  /// top-right slot the original mockup marks for its "Refresh Button" -
+  /// always describing whichever tab is currently active.
+  Widget _statusArea() {
+    final String label;
+    if (_activeSnapshot.error != null) {
+      label = 'error';
+    } else if (_activeSnapshot.lastUpdated == null) {
+      label = '—';
+    } else {
+      final next = _activeSnapshot.lastUpdated!.add(_activeClient.pollInterval);
+      final remaining = next.difference(DateTime.now());
+      label = remaining.isNegative ? 'now' : 'next ${remaining.inSeconds}s';
+    }
+    final dotColor = _activeIsLive ? AppColors.profitGreen : AppColors.textMuted;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 5),
+                Text(_activeIsLive ? 'LIVE' : 'IDLE',
+                    style: TextStyle(
+                        color: dotColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.6)),
+              ],
             ),
-            const SizedBox(width: 5),
-            Text(_isLive ? 'LIVE' : 'IDLE',
-                style: TextStyle(
-                    color: dotColor,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.6)),
+            const SizedBox(height: 2),
+            Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
           ],
         ),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
+        const SizedBox(width: 4),
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded, size: 16, color: AppColors.textMuted),
+          tooltip: 'Refresh Finviz, Yahoo & Combined now',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+          onPressed: _refreshAllNow,
+        ),
       ],
     );
   }
 
-  Widget _body() {
-    if (_snapshot.error != null) {
+  Widget _body(ScreenerSnapshot snapshot) {
+    if (snapshot.error != null) {
       return _emptyState(
         icon: Icons.cloud_off_rounded,
         title: 'Can\'t reach the backend',
-        subtitle: _snapshot.error!,
+        subtitle: snapshot.error!,
         iconColor: AppColors.lossRed,
       );
     }
-    if (_snapshot.rows.isEmpty) {
+    if (snapshot.rows.isEmpty) {
       return _emptyState(
         icon: Icons.search_off_rounded,
         title: 'No movers right now',
-        subtitle: 'Finviz isn\'t showing any unusual-volume movers at the moment.',
+        subtitle: 'This source isn\'t showing any movers at the moment.',
+        iconColor: AppColors.textMuted,
+      );
+    }
+    final rows = _filters.apply(snapshot.rows);
+    if (rows.isEmpty) {
+      return _emptyState(
+        icon: Icons.filter_alt_off_rounded,
+        title: 'No matches',
+        subtitle: 'Nothing in this list passes the current filters.',
         iconColor: AppColors.textMuted,
       );
     }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: _snapshot.rows.length,
+      itemCount: rows.length,
       separatorBuilder: (_, _) => const Divider(height: 1, color: AppColors.border, indent: 16),
-      itemBuilder: (context, i) => _row(i, _snapshot.rows[i]),
+      itemBuilder: (context, i) => _row(i, rows[i]),
     );
   }
 
@@ -337,8 +476,11 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
 
   Widget _volumeChip(double volume) => _chip('Vol ${formatCompactVolume(volume)}');
 
-  Widget _sectorChip(String sector) =>
-      ConstrainedBox(constraints: const BoxConstraints(maxWidth: 110), child: _chip(sector));
+  // No fixed max width here (unlike the old single-column layout) - the
+  // panel is now user-resizable, so the sector chip should be free to use
+  // whatever room is available instead of eliding early; Wrap already
+  // drops it to the next line if a row gets tight.
+  Widget _sectorChip(String sector) => _chip(sector);
 
   Widget _chip(String label) {
     return Container(
@@ -351,12 +493,5 @@ class _ScreenerPanelState extends State<ScreenerPanel> {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: AppColors.textMuted, fontSize: 9.5)),
     );
-  }
-
-  String _relativeTime(DateTime t) {
-    final diff = DateTime.now().difference(t);
-    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    return '${diff.inHours}h ago';
   }
 }

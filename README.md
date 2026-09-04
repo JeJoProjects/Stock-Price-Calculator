@@ -1,6 +1,6 @@
-# StockCalc
+# Stock Screener
 
-StockCalc is a Flutter + Dart Windows desktop app for calculating stock investment profit, with a Dart backend service for live market data features.
+Stock Screener is a Flutter + Dart Windows desktop app for calculating stock investment profit and screening live Finviz/Yahoo movers, with a Dart backend service for live market data features.
 
 ## Quick Start
 

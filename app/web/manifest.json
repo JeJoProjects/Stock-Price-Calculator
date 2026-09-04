@@ -1,11 +1,11 @@
 {
-    "name": "stockcalc",
-    "short_name": "stockcalc",
+    "name": "Stock Screener",
+    "short_name": "Stock Screener",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Stock investment profit calculator with live micro-cap screener",
+    "description": "Stock investment profit calculator with a live Finviz/Yahoo movers screener",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

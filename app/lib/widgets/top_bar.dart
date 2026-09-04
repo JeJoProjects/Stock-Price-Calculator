@@ -20,12 +20,12 @@ class TopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Text('↗ StockCalc',
+          const Text('↗ Stock Screener',
               style: TextStyle(
                   color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(width: 12),
           Flexible(
-            child: Text('Realtime stock symbol search and profit planning',
+            child: Text('Realtime stock symbol search, screening, and profit planning',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
           ),

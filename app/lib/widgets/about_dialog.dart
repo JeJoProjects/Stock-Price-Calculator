@@ -16,7 +16,7 @@ void showStockCalcAboutDialog(BuildContext context) {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Stock Price Calculator',
+            Text('Stock Screener',
                 style: TextStyle(
                     color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
             SizedBox(height: 4),
@@ -24,8 +24,8 @@ void showStockCalcAboutDialog(BuildContext context) {
                 style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
             SizedBox(height: 16),
             Text(
-              'A stock investment profit calculator with a live micro-cap '
-              'unusual-move screener.',
+              'A stock investment profit calculator with a live Finviz/Yahoo '
+              'movers screener.',
               style: TextStyle(color: AppColors.textPrimary, fontSize: 13, height: 1.4),
             ),
             SizedBox(height: 16),

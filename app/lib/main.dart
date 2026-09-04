@@ -12,7 +12,7 @@ import 'core/settings_service.dart';
 import 'market/market_client.dart';
 import 'search/search_engine.dart';
 import 'search/ticker_data.dart';
-import 'screener/screener_client.dart';
+import 'screener/screener_hub.dart';
 import 'screener/screener_models.dart';
 import 'theme/app_theme.dart';
 import 'widgets/about_dialog.dart';
@@ -20,6 +20,7 @@ import 'widgets/chart_pane.dart';
 import 'widgets/combined_stats_bar.dart';
 import 'widgets/menu_bar_row.dart';
 import 'widgets/new_purchase_card.dart';
+import 'widgets/panel_resize_handle.dart';
 import 'widgets/preferences_dialog.dart';
 import 'widgets/purchase_panel_card.dart';
 import 'widgets/screener_panel.dart';
@@ -58,7 +59,7 @@ class StockCalcApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'StockCalc',
+      title: 'Stock Screener',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: const HomePage(),
@@ -80,7 +81,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
   int _nextPanelId = 1;
   SearchEngine? _searchEngine;
   final _searchFocusNode = FocusNode();
-  final _screenerClient = ScreenerClient();
+  final _screenerHub = ScreenerHub();
   final _marketClient = MarketDataService();
   final _backendLauncher = BackendLauncher();
   final _settingsService = SettingsService();
@@ -115,7 +116,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
   Future<void> _loadSettings() async {
     final settings = await _settingsService.load();
     setState(() => _settings = settings);
-    _screenerClient.setPollInterval(Duration(seconds: settings.screenerRefreshSeconds));
+    _screenerHub.setPollInterval(Duration(seconds: settings.screenerRefreshSeconds));
   }
 
   /// Ported from main.cpp's saveSettings-on-shutdown, but continuous
@@ -152,7 +153,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
     if (result != null) {
       setState(() => _settings = result);
       await _settingsService.save(result);
-      _screenerClient.setPollInterval(Duration(seconds: result.screenerRefreshSeconds));
+      _screenerHub.setPollInterval(Duration(seconds: result.screenerRefreshSeconds));
     }
   }
 
@@ -165,7 +166,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
       panel.tickerSymbol = row.symbol;
       panel.companyName = row.name;
       panel.exchange = row.exchange;
-      panel.matchPreview = 'From micro-cap screener';
+      panel.matchPreview = 'From screener';
       panel.priceText = row.price.toStringAsFixed(2);
       panel.updateFieldTracking(2);
       _recalculateAll();
@@ -312,68 +313,99 @@ class _HomePageState extends State<HomePage> with WindowListener {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(kPanelSpacing),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Micro-Cap Movers gets its own full-height column on
-                    // the left, like a watchlist rail, rather than sharing
-                    // the right sidebar with the chart.
-                    Container(
-                      width: 320,
-                      margin: const EdgeInsets.only(right: kPanelSpacing),
-                      child: ScreenerPanel(client: _screenerClient, onSelect: _applyScreenerRow),
-                    ),
-                    // Centered, wrapping layout: with few panels the group
-                    // sits in the visual middle of the area (reads as
-                    // intentional) rather than pinned top-left with a huge
-                    // empty area below; with many panels it flows into
-                    // additional rows, filling both width and height.
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) => SingleChildScrollView(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                            child: Center(
-                              child: Wrap(
-                                alignment: WrapAlignment.center,
-                                runAlignment: WrapAlignment.center,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                spacing: kPanelSpacing,
-                                runSpacing: kPanelSpacing,
-                                children: [
-                                  for (var i = 0; i < _panels.length; i++)
-                                    PurchasePanelCard(
-                                      key: ValueKey(_panels[i].id),
-                                      panel: _panels[i],
-                                      result: _results[i],
-                                      canDelete: _panels.length > 1,
-                                      onFieldChanged: (fieldId, text) =>
-                                          _onFieldChanged(i, fieldId, text),
-                                      onReset: () => setState(() {
-                                        _panels[i].reset();
-                                        _recalculateAll();
-                                      }),
-                                      onDelete: () => _removePanel(i),
-                                    ),
-                                  NewPurchaseCard(onTap: _addPanel),
-                                ],
+                // Outer LayoutBuilder so the splitter below can be bounded
+                // by the row's actual available width - same rule Visual
+                // Studio's docked-panel splitters follow: a sibling panel
+                // always keeps a sane minimum instead of being squeezed to
+                // nothing while dragging.
+                child: LayoutBuilder(
+                  builder: (context, rowConstraints) {
+                    const chartPaneWidth = 340.0;
+                    const resizeHandleWidth = 10.0;
+                    const centerMinWidth = 260.0;
+                    final maxScreenerWidth = (rowConstraints.maxWidth -
+                            chartPaneWidth -
+                            kPanelSpacing * 2 -
+                            resizeHandleWidth -
+                            centerMinWidth)
+                        .clamp(300.0, 900.0);
+                    final screenerWidth =
+                        _settings.screenerPanelWidth.clamp(300.0, maxScreenerWidth);
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // The tabbed Finviz/Yahoo/Combined screener gets its
+                        // own full-height column on the left, like a
+                        // watchlist rail, rather than sharing the right
+                        // sidebar with the chart. User-resizable (drag the
+                        // handle to its right) since wider gives row content
+                        // - names, chips - more room to breathe instead of
+                        // eliding; width is persisted like window geometry.
+                        SizedBox(
+                          width: screenerWidth,
+                          child: ScreenerPanel(hub: _screenerHub, onSelect: _applyScreenerRow),
+                        ),
+                        PanelResizeHandle(
+                          onDragDelta: (dx) => setState(() {
+                            _settings.screenerPanelWidth =
+                                (_settings.screenerPanelWidth + dx).clamp(300.0, maxScreenerWidth);
+                          }),
+                          onDragEnd: () => _settingsService.save(_settings),
+                        ),
+                        // Centered, wrapping layout: with few panels the
+                        // group sits in the visual middle of the area (reads
+                        // as intentional) rather than pinned top-left with a
+                        // huge empty area below; with many panels it flows
+                        // into additional rows, filling both width and
+                        // height.
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) => SingleChildScrollView(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                child: Center(
+                                  child: Wrap(
+                                    alignment: WrapAlignment.center,
+                                    runAlignment: WrapAlignment.center,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    spacing: kPanelSpacing,
+                                    runSpacing: kPanelSpacing,
+                                    children: [
+                                      for (var i = 0; i < _panels.length; i++)
+                                        PurchasePanelCard(
+                                          key: ValueKey(_panels[i].id),
+                                          panel: _panels[i],
+                                          result: _results[i],
+                                          canDelete: _panels.length > 1,
+                                          onFieldChanged: (fieldId, text) =>
+                                              _onFieldChanged(i, fieldId, text),
+                                          onReset: () => setState(() {
+                                            _panels[i].reset();
+                                            _recalculateAll();
+                                          }),
+                                          onDelete: () => _removePanel(i),
+                                        ),
+                                      NewPurchaseCard(onTap: _addPanel),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    Container(
-                      width: 340,
-                      margin: const EdgeInsets.only(left: kPanelSpacing),
-                      child: ChartPane(
-                        symbol: _chartSymbol,
-                        companyName: _chartCompany,
-                        exchange: _chartExchange,
-                        client: _marketClient,
-                      ),
-                    ),
-                  ],
+                        Container(
+                          width: 340,
+                          margin: const EdgeInsets.only(left: kPanelSpacing),
+                          child: ChartPane(
+                            symbol: _chartSymbol,
+                            companyName: _chartCompany,
+                            exchange: _chartExchange,
+                            client: _marketClient,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -423,7 +455,7 @@ class _HomePageState extends State<HomePage> with WindowListener {
     if (_isDesktop) windowManager.removeListener(this);
     _windowSaveDebounce?.cancel();
     _searchFocusNode.dispose();
-    _screenerClient.dispose();
+    _screenerHub.dispose();
     _marketClient.close();
     _backendLauncher.stopIfOwned();
     super.dispose();
