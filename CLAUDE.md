@@ -164,7 +164,7 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 58 tests - verified passing 2026-10-05
+flutter test        :: 59 tests - verified passing 2026-10-05
 cd ../backend
 dart test            :: 22 tests - verified passing today
 ```
@@ -507,8 +507,11 @@ automatically when an engine appears after startup). Drag-and-drop, "Files..." (
 sort order), or paste (Ctrl+V while hovering the tab, or the Paste button — a
 Snipping Tool screenshot or an Explorer-copied file) any number of files.
 Files queue on the left (per-file pending/running/done/error status, remove
-button) and are OCR'd **one at a time, in order**; one file failing never
-stops the rest. Everything accumulates into **one combined Markdown
+button) and are OCR'd by a **worker pool** (`ImageRecognizer.preferredConcurrency`:
+Tesseract = cores-1, max 6, each process pinned to 1 thread via
+`OMP_THREAD_LIMIT=1`; PaddleOCR sidecar = 1). Measured on 16 cores, 12 full-page
+images: 61s sequential -> 14s parallel. Results always stay in list order, and
+one file failing never stops the rest. No GPU path: Tesseract has none. Everything accumulates into **one combined Markdown
 document** on the right: `# <title>` (editable), then `## PART 1: FULL OCR
 TEXT EXTRACTION`, then per file `### Document N - \`CamelCaseLabel\`` + the
 text in a fenced block (fence auto-lengthens if the text itself contains

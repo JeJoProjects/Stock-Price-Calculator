@@ -14,6 +14,10 @@ class OcrSidecarClient implements ImageRecognizer {
   OcrSidecarClient({this.baseUrl = 'http://127.0.0.1:8091', http.Client? httpClient})
       : _http = httpClient ?? http.Client();
 
+  // The sidecar already parallelizes internally and serializes requests.
+  @override
+  int get preferredConcurrency => 1;
+
   @override
   Future<String> recognize(Uint8List imageBytes) async {
     final http.Response res;

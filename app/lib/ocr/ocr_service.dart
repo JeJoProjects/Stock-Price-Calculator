@@ -17,6 +17,8 @@ class OcrService {
 
   OcrService({this.recognizer});
 
+  int get concurrency => recognizer?.preferredConcurrency ?? 1;
+
   Future<OcrResult> extract(File file) async {
     final length = await file.length();
     if (length > _maxFileSizeBytes) {

@@ -151,7 +151,7 @@ class OcrBatchController extends ChangeNotifier {
   OcrService _service;
   final List<OcrBatchItem> items = [];
   String? notice;
-  bool _draining = false;
+  int _activeWorkers = 0;
   bool _disposed = false;
   int _pasteCounter = 0;
 
@@ -251,9 +251,16 @@ class OcrBatchController extends ChangeNotifier {
     }
   }
 
+  /// Tops the worker pool up to the engine's concurrency and waits for those
+  /// workers. Workers claim the next pending item synchronously (no await
+  /// between pick and mark), so no file is processed twice.
   Future<void> _drain() async {
-    if (_draining) return;
-    _draining = true;
+    final missing = _service.concurrency.clamp(1, 16) - _activeWorkers;
+    await Future.wait([for (var i = 0; i < missing; i++) _worker()]);
+  }
+
+  Future<void> _worker() async {
+    _activeWorkers++;
     try {
       while (!_disposed) {
         final next = items.where((i) => i.status == OcrItemStatus.pending).firstOrNull;
@@ -278,7 +285,7 @@ class OcrBatchController extends ChangeNotifier {
         _notify();
       }
     } finally {
-      _draining = false;
+      _activeWorkers--;
     }
   }
 

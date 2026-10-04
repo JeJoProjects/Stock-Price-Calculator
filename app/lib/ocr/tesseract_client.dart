@@ -100,6 +100,12 @@ class TesseractClient implements ImageRecognizer {
         '${Platform.pathSeparator}tesseract.exe';
   }
 
+  /// One single-threaded Tesseract process per core beats one multi-threaded
+  /// process at a time (its OpenMP threading scales poorly). Leave a core
+  /// free for the UI, cap at 6 to bound memory.
+  @override
+  int get preferredConcurrency => (Platform.numberOfProcessors - 1).clamp(1, 6);
+
   @override
   Future<String> recognize(Uint8List imageBytes) async {
     final tempDir = await Directory.systemTemp.createTemp('stockcalc_ocr_');
@@ -115,7 +121,8 @@ class TesseractClient implements ImageRecognizer {
         if (tessdataDir != null) ...['--tessdata-dir', tessdataDir!],
         '-l',
         languages,
-      ]).timeout(const Duration(seconds: 60));
+      ], environment: const {'OMP_THREAD_LIMIT': '1'})
+          .timeout(const Duration(seconds: 60));
 
       if (result.exitCode != 0) {
         throw OcrException(

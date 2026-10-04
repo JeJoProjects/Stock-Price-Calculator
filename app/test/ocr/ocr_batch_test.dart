@@ -10,6 +10,9 @@ class _FakeRecognizer implements ImageRecognizer {
   _FakeRecognizer(this.byLength);
 
   @override
+  int get preferredConcurrency => 1;
+
+  @override
   Future<String> recognize(Uint8List imageBytes) async {
     final text = byLength[imageBytes.length];
     if (text == null) throw StateError('boom');
@@ -103,7 +106,40 @@ void main() {
   });
 }
 
+class _SlowRecognizer implements ImageRecognizer {
+  int running = 0, maxRunning = 0;
+  @override
+  int get preferredConcurrency => 3;
+
+  @override
+  Future<String> recognize(Uint8List imageBytes) async {
+    maxRunning = ++running > maxRunning ? running : maxRunning;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    running--;
+    return 'text${imageBytes.length}';
+  }
+}
+
 void ocrBatchRetryTests() {
+  test('files are processed in parallel up to the engine concurrency, results stay in order',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('ocr_parallel_test');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final paths = [
+      for (var i = 1; i <= 9; i++)
+        (File('${dir.path}/f$i.png')..writeAsBytesSync(List.filled(i, 1))).path,
+    ];
+    final engine = _SlowRecognizer();
+    final batch = OcrBatchController(OcrService(recognizer: engine));
+
+    await batch.addPaths(paths);
+
+    expect(engine.maxRunning, 3);
+    expect(batch.items.every((i) => i.status == OcrItemStatus.done), isTrue);
+    expect(batch.items.map((i) => i.text).toList(), [for (var i = 1; i <= 9; i++) 'text$i']);
+    batch.dispose();
+  });
+
   test('files that failed for lack of an engine are retried when one arrives', () async {
     final dir = Directory.systemTemp.createTempSync('ocr_retry_test');
     addTearDown(() => dir.deleteSync(recursive: true));
