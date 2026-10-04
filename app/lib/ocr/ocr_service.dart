@@ -50,7 +50,8 @@ class OcrService {
   Future<OcrResult> _extractImage(File file) async {
     if (recognizer == null) {
       throw const OcrException(
-          OcrErrorKind.engineUnavailable, 'The OCR engine is not available yet.');
+          OcrErrorKind.engineUnavailable, 'No OCR engine found. Install Tesseract (winget install UB-Mannheim.TesseractOCR) '
+              'and restart the app, or build the PaddleOCR sidecar with run_flutter.bat --rebuild-ocr.');
     }
     final bytes = await file.readAsBytes();
     final text = await recognizer!.recognize(bytes);

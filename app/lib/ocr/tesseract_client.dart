@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'image_recognizer.dart';
@@ -13,7 +14,44 @@ import 'ocr_models.dart';
 class TesseractClient implements ImageRecognizer {
   final String exePath;
 
-  TesseractClient(this.exePath);
+  /// Folder holding *.traineddata. When null, Tesseract's own default is used.
+  final String? tessdataDir;
+
+  /// Languages to request, e.g. `eng+deu`.
+  final String languages;
+
+  TesseractClient(this.exePath, {this.tessdataDir, this.languages = 'eng'});
+
+  /// Languages we want when available, in priority order. German goes first:
+  /// Tesseract's combined models favour the first language, and `eng+deu`
+  /// measurably dropped umlauts ("für" -> "fur") that `deu+eng` kept.
+  /// Documents here are typically German and English; add codes (e.g. `mal`) by dropping the
+  /// matching .traineddata into the bundled tessdata folder and listing it.
+  static const preferredLanguages = ['deu', 'eng'];
+
+  /// Picks `deu+eng`-style language string from the installed traineddata
+  /// names, falling back to `eng` so a bare install still works.
+  static String pickLanguages(Iterable<String> available) {
+    final have = available.toSet();
+    final chosen = preferredLanguages.where(have.contains).toList();
+    return chosen.isEmpty ? 'eng' : chosen.join('+');
+  }
+
+  /// Builds a client for [exePath], using the bundled `tessdata` folder next
+  /// to the app exe when it has English data, else Tesseract's default.
+  static Future<TesseractClient> create(String exePath, {String? bundledTessdata}) async {
+    if (bundledTessdata != null &&
+        await File('$bundledTessdata${Platform.pathSeparator}eng.traineddata').exists()) {
+      final names = <String>[
+        await for (final e in Directory(bundledTessdata).list())
+          if (e is File && e.path.toLowerCase().endsWith('.traineddata'))
+            e.uri.pathSegments.last.replaceAll(RegExp(r'\.traineddata$', caseSensitive: false), ''),
+      ];
+      return TesseractClient(exePath,
+          tessdataDir: bundledTessdata, languages: pickLanguages(names));
+    }
+    return TesseractClient(exePath);
+  }
 
   /// Looks for tesseract.exe in order: bundled next to this app's own exe
   /// (future redistribution path, mirrors backend_launcher.dart), then
@@ -32,7 +70,7 @@ class TesseractClient implements ImageRecognizer {
 
     for (final path in candidates) {
       if (path != null && await File(path).exists()) {
-        return TesseractClient(path);
+        return create(path, bundledTessdata: _bundledTessdata());
       }
     }
 
@@ -41,7 +79,7 @@ class TesseractClient implements ImageRecognizer {
       final result = await Process.run('where', ['tesseract']);
       if (result.exitCode == 0) {
         final path = (result.stdout as String).trim().split('\n').first.trim();
-        if (path.isNotEmpty) return TesseractClient(path);
+        if (path.isNotEmpty) return await create(path, bundledTessdata: _bundledTessdata());
       }
     } catch (_) {
       // `where` itself missing/failing just means PATH lookup isn't
@@ -49,6 +87,11 @@ class TesseractClient implements ImageRecognizer {
     }
 
     return null;
+  }
+
+  static String _bundledTessdata() {
+    final appDir = File(Platform.resolvedExecutable).parent;
+    return '${appDir.path}${Platform.pathSeparator}tessdata';
   }
 
   static String? _bundledPath() {
@@ -66,8 +109,13 @@ class TesseractClient implements ImageRecognizer {
     try {
       await inputFile.writeAsBytes(imageBytes);
 
-      final result = await Process.run(exePath, [inputFile.path, outputBase, '-l', 'eng'])
-          .timeout(const Duration(seconds: 30));
+      final result = await Process.run(exePath, [
+        inputFile.path,
+        outputBase,
+        if (tessdataDir != null) ...['--tessdata-dir', tessdataDir!],
+        '-l',
+        languages,
+      ]).timeout(const Duration(seconds: 60));
 
       if (result.exitCode != 0) {
         throw OcrException(
@@ -81,7 +129,7 @@ class TesseractClient implements ImageRecognizer {
         throw const OcrException(
             OcrErrorKind.extractionFailed, 'Tesseract did not produce any output.');
       }
-      return await outputFile.readAsString();
+      return await outputFile.readAsString(encoding: utf8);
     } on TimeoutException {
       throw const OcrException(OcrErrorKind.timeout, 'OCR took too long and was cancelled.');
     } finally {

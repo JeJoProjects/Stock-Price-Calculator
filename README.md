@@ -42,7 +42,7 @@ The app's second tab extracts text locally and offline from images, PDFs (digita
 
 - Excel/CSV and digitally-generated PDFs are read directly (no OCR, no accuracy loss).
 - Images and scanned PDF pages go through one of two engines, chosen automatically at startup (`_resolveOcrEngine` in `app/lib/main.dart`):
-  - **Tesseract** (`app/lib/ocr/tesseract_client.dart`) - the default. Needs the [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) engine installed (e.g. `winget install tesseract-ocr.tesseract`), nothing else. Good accuracy on clean printed text, noticeably rougher on stylized/colored layouts.
+  - **Tesseract** (`app/lib/ocr/tesseract_client.dart`) - the default. Needs the [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) engine installed (e.g. `winget install UB-Mannheim.TesseractOCR`), nothing else. Good accuracy on clean printed text, noticeably rougher on stylized/colored layouts.
   - **PaddleOCR** (`pyocr/`, via `app/lib/ocr/ocr_sidecar_client.dart`) - higher accuracy, especially on complex layouts and tables, but needs the optional Python/PyInstaller build step below. Preferred automatically when its sidecar is running.
 - **Both are optional and the rest of the app works without either.** If neither Tesseract nor the PaddleOCR sidecar is available, the OCR tab shows an "engine unavailable" state for images (Excel/digital-PDF extraction still works).
 

@@ -33,6 +33,8 @@ if "%TARGET%"=="ios" goto :UnsupportedHostIos
 call :ResolveFlutterSdk
 if errorlevel 1 goto :Error
 
+call :EnsurePubCache
+
 echo [1/7] Checking for Flutter SDK...
 echo Using Flutter SDK at "%FLUTTER_ROOT%"
 echo Target platform: %TARGET%
@@ -118,6 +120,7 @@ popd
 
 echo [6/7] Checking for a local OCR engine ^(Tesseract^)...
 call :CheckTesseract
+call :PrepareTessdata
 
 echo [7/7] Building the local PaddleOCR sidecar ^(optional, higher accuracy^)...
 call :BuildOcrSidecar
@@ -181,6 +184,26 @@ pause
 endlocal
 exit /b 1
 
+rem Bundles Tesseract language data next to the app exe (Release\tessdata):
+rem English + OSD copied from the Tesseract install, German downloaded
+rem (tessdata_best). TesseractClient picks eng+deu from whatever is present.
+rem Never fails the build - OCR just falls back to English-only.
+:PrepareTessdata
+set "TD=%~dp0app\build\windows\x64\runner\Release\tessdata"
+if exist "%TD%\deu.traineddata" if exist "%TD%\eng.traineddata" exit /b 0
+set "TESS_DIR="
+if exist "C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata" set "TESS_DIR=C:\Program Files\Tesseract-OCR\tessdata"
+if not defined TESS_DIR exit /b 0
+if not exist "%TD%" mkdir "%TD%"
+copy /Y "%TESS_DIR%\eng.traineddata" "%TD%\" >nul
+if exist "%TESS_DIR%\osd.traineddata" copy /Y "%TESS_DIR%\osd.traineddata" "%TD%\" >nul
+if not exist "%TD%\deu.traineddata" (
+    echo Downloading German OCR language data...
+    powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing 'https://github.com/tesseract-ocr/tessdata_best/raw/main/deu.traineddata' -OutFile '%TD%\deu.traineddata' } catch { exit 1 }"
+    if errorlevel 1 echo WARNING: could not download German data - OCR will be English only.
+)
+exit /b 0
+
 rem Just informs the user whether Tesseract (the default, zero-Python OCR
 rem engine for the OCR tab - see app/lib/ocr/tesseract_client.dart) is
 rem installed. Never fails the build either way - TesseractClient.detect()
@@ -194,7 +217,7 @@ if errorlevel 1 (
     )
     echo Tesseract was not found. Image/scanned-PDF OCR will show as
     echo unavailable until it's installed:
-    echo   winget install tesseract-ocr.tesseract
+    echo   winget install UB-Mannheim.TesseractOCR
     echo ^(Excel and digitally-generated PDFs don't need it and work either way.^)
     exit /b 0
 )
@@ -213,8 +236,8 @@ python --version >nul 2>&1
 if errorlevel 1 (
     echo WARNING: Python was not found - skipping the PaddleOCR sidecar.
     echo Install Python 3.11+ from python.org ^(or: winget install
-    echo Python.Python.3.12^), then rerun this script. Tesseract (if
-    echo installed) still covers OCR in the meantime.
+    echo Python.Python.3.12^), then rerun this script. Tesseract ^(if
+    echo installed^) still covers OCR in the meantime.
     exit /b 0
 )
 
@@ -266,6 +289,18 @@ echo PaddleOCR sidecar built successfully - it will be preferred over
 echo Tesseract automatically at app startup.
 exit /b 0
 
+rem Windows plugin builds run cargokit's resolve_symlinks.ps1, which calls
+rem Get-Item without -Force and so fails ("Could not find item ...\AppData")
+rem when the pub cache sits under the hidden %LOCALAPPDATA% folder (the
+rem default). Unless the user already set PUB_CACHE, use a non-hidden cache
+rem inside the repo (external\ is gitignored).
+:EnsurePubCache
+if defined PUB_CACHE exit /b 0
+set "PUB_CACHE=%~dp0external\pub_cache"
+if not exist "%PUB_CACHE%" mkdir "%PUB_CACHE%"
+echo Using non-hidden pub cache at "%PUB_CACHE%"
+exit /b 0
+
 :ResolveFlutterSdk
 set "FLUTTER_ROOT_IN=%FLUTTER_ROOT%"
 set "FLUTTER_HOME_IN=%FLUTTER_HOME%"
@@ -273,12 +308,20 @@ set "FLUTTER_ROOT="
 set "FLUTTER_CMD="
 set "DART_CMD="
 set "LOCAL_FLUTTER_ROOT=%~dp0external\flutter"
+rem Flutter native-assets hooks launch the Dart SDK via an unquoted path, so an SDK
+rem under a folder with spaces fails ("D:\C++\01_Test" is not recognized).
+rem Use a space-free SDK path when the repo path contains spaces.
+set "REPO_DIR_NOSPACE=%~dp0"
+set "REPO_DIR_NOSPACE=!REPO_DIR_NOSPACE: =!"
+if not "!REPO_DIR_NOSPACE!"=="%~dp0" set "LOCAL_FLUTTER_ROOT=%SystemDrive%\src\flutter"
 
 if defined FLUTTER_ROOT_IN if exist "%FLUTTER_ROOT_IN%\bin\flutter.bat" set "FLUTTER_ROOT=%FLUTTER_ROOT_IN%" & goto :FlutterFound
 if defined FLUTTER_HOME_IN if exist "%FLUTTER_HOME_IN%\bin\flutter.bat" set "FLUTTER_ROOT=%FLUTTER_HOME_IN%"
 if defined FLUTTER_ROOT if exist "%FLUTTER_ROOT%\bin\flutter.bat" goto :FlutterFound
 
 for %%I in (
+    "%LOCAL_FLUTTER_ROOT%"
+    "%~dp0external\flutter"
     "%~dp0flutter"
     "%~dp0..\flutter"
     "C:\flutter"

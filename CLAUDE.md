@@ -88,6 +88,39 @@ re-running the script. This isn't handled automatically — worth fixing in
 the script if it becomes a recurring annoyance (e.g. have it try to kill its
 own previously-spawned processes by name before compiling).
 
+**Gotcha (fixed 2026-10-05): hidden pub cache breaks the Windows plugin
+build.** `super_native_extensions`' cargokit `resolve_symlinks.ps1` calls
+`Get-Item` without `-Force`, so with the default pub cache under the hidden
+`%LOCALAPPDATA%` (`C:\Users\<you>\AppData\Local\Pub\Cache`) the native-assets
+step fails with `Get-Item : Could not find item C:\Users\<you>\AppData` /
+`Target build_hooks failed`. Both scripts now call `:EnsurePubCache`, which
+sets `PUB_CACHE` to `external\pub_cache` (gitignored, non-hidden) unless the
+user already set `PUB_CACHE`. If you run `flutter build windows` by hand,
+set `PUB_CACHE` to a non-hidden folder first, or the same error returns (and
+delete `app\windows\flutter\ephemeral` so the plugin symlinks are
+regenerated against the new cache).
+
+**Gotcha (fixed 2026-10-05): Flutter SDK under a path with spaces breaks
+native-assets hooks.** This repo's own path (`D:\C++\01_Test Project\...`)
+has spaces; the hook runner launches `dart` through an unquoted path and
+fails with `'D:\C++\01_Test' is not recognized` / `Target build_hooks failed`
+(reported against `package:objective_c`). Verified: the identical build
+succeeds with the SDK at `C:\src\flutter`. Both scripts now use
+`%SystemDrive%\src\flutter` as the repo-local SDK location whenever the repo
+path contains a space (otherwise `external\flutter`). The app/backend/pub
+cache may still live under the spaced repo path; only the SDK must be
+space-free. Also, pub downloads can transiently fail with "Pub failed to
+rename directory because access was denied" (antivirus scanning fresh
+packages) — just rerun; already-downloaded packages are kept.
+
+**Gotcha (fixed 2026-10-05): `:ResolveFlutterSdk` used to wipe
+`external\flutter`.** It never checked `external\flutter` itself, only
+FLUTTER_ROOT/FLUTTER_HOME, a few fixed paths, and PATH — so run from a shell
+without Flutter on PATH it concluded the SDK was missing and `rmdir /s /q`'d
+the existing local copy before re-cloning. `external\flutter` is now the
+first location checked. Don't run the scripts while an IDE's Dart/Flutter
+daemons are using that SDK if you can avoid it (locked files).
+
 ### Other targets
 ```bat
 setup_flutter.bat --android        :: Android APK (needs Android SDK; the
@@ -131,7 +164,7 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 48 tests - verified passing today
+flutter test        :: 58 tests - verified passing 2026-10-05
 cd ../backend
 dart test            :: 22 tests - verified passing today
 ```
@@ -466,11 +499,33 @@ setup_flutter.bat / run_flutter.bat   Build/run entrypoints (see above)
 
 ## OCR Tab
 
-Second top-level tab. Drag-and-drop, "Browse...", or paste (Ctrl+V while
-hovering the tab, or the Paste button) an image, PDF, or Excel/CSV file —
-including a Snipping Tool screenshot copied straight from the clipboard.
-Result appears in an **editable** text box (not read-only — users can clean
-up OCR'd text before copying) with Copy and Clear buttons. 50MB file-size cap.
+Second top-level tab, **batch-oriented** (if every file shows "No OCR engine
+found", Tesseract isn't installed - `winget install UB-Mannheim.TesseractOCR`
+and restart; failed files get a **Retry** button and are retried
+automatically when an engine appears after startup). Drag-and-drop, "Files..." (multi-select),
+"Folder..." (recursive — every supported image/PDF/Excel/CSV inside, natural
+sort order), or paste (Ctrl+V while hovering the tab, or the Paste button — a
+Snipping Tool screenshot or an Explorer-copied file) any number of files.
+Files queue on the left (per-file pending/running/done/error status, remove
+button) and are OCR'd **one at a time, in order**; one file failing never
+stops the rest. Everything accumulates into **one combined Markdown
+document** on the right: `# <title>` (editable), then `## PART 1: FULL OCR
+TEXT EXTRACTION`, then per file `### Document N - \`CamelCaseLabel\`` + the
+text in a fenced block (fence auto-lengthens if the text itself contains
+```` ``` ````). The **Preview** toggle renders it like a chat-artifact view
+(label chip, monospace block, per-block copy icon); **Markdown** shows the
+editable source (edits stick until "Reset edits"). **Copy all** and
+**Save .md** use that one document as a single text source. 50MB per-file cap.
+
+Code: `lib/ocr/ocr_batch.dart` (pure Dart, unit-tested in
+`test/ocr/ocr_batch_test.dart`, plus `test/ocr/tesseract_client_test.dart`
+which renders a German image and runs REAL Tesseract end-to-end - auto-skipped
+when Tesseract/German data aren't present: `expandInputs`, `labelFromFileName`,
+`buildOcrMarkdown`, `OcrBatchController`) + `lib/widgets/ocr_panel.dart`
+(UI only). Labels come from file names ("German A1 cert-2021.png" ->
+`GermanA1Cert2021`; "1.1 - 01.2022 - Jährliche Mitteilung.jpg" ->
+`1.1_01.2022JährlicheMitteilung`, Unicode kept; duplicates get ` (2)`), so name files meaningfully before
+batching. The heading noun is the literal "Document" in `buildOcrMarkdown`.
 
 ### Routing logic (`app/lib/ocr/ocr_service.dart`)
 
@@ -501,12 +556,19 @@ at startup (sidecar tried first, unconditionally, before falling back):
    ready. Higher accuracy, especially on stylized/complex layouts and
    tables. HTTP POST to `/ocr` with a 30s timeout; a 503 response maps to
    `engineUnavailable`, not a hard error.
-2. **`TesseractClient`** — the fallback/default. Shells out to a locally
+2. **`TesseractClient`** (languages: **`deu+eng`**, German first - `eng+deu`
+   measurably dropped umlauts, "für" -> "fur"; data comes from a bundled
+   `Release	essdata` folder that `setup_flutter.bat`/`run_flutter.bat`
+   populate via `:PrepareTessdata` - eng/osd copied from the Tesseract
+   install, deu downloaded from tessdata_best - and is passed with
+   `--tessdata-dir`; without that folder it falls back to plain `eng`.
+   Add other languages by dropping `<lang>.traineddata` there and listing
+   it in `TesseractClient.preferredLanguages`.) — the fallback/default. Shells out to a locally
    installed `tesseract.exe` (`<in> <outBase> -l eng`, 30s timeout) — no
    Python, no sidecar process, just a subprocess call per OCR request. It
    searches a bundled path, then two hardcoded Program Files paths, then
    `where tesseract` on PATH. Zero extra setup if Tesseract is already
-   installed (`winget install tesseract-ocr.tesseract`); noticeably rougher
+   installed (`winget install UB-Mannheim.TesseractOCR`); noticeably rougher
    than PaddleOCR on colored/stylized layouts, fine on clean printed text.
 3. If neither is available: `OcrService(recognizer: null)` — Excel/digital
    PDFs still work, images throw a clean `engineUnavailable` error that the
