@@ -24,7 +24,7 @@ CMake, or `src/*.cpp` elsewhere.
 **Last verified:** 2026-10-04. `setup_flutter.bat`/`run_flutter.bat` were
 actually executed end-to-end on a clean-ish Windows checkout (not just read),
 `flutter analyze` ran clean (0 issues), and the full test suite was run for
-real: 48/48 app tests pass (`cd app && flutter test`), 22/22 backend tests
+real: 48/48 app tests pass (`cd app && flutter test`), 26/26 backend tests
 pass (`cd backend && dart test`, including new Alpha Vantage client/candle
 cache coverage added the same day — see Candle Data below). Android/Linux/iOS
 build paths were reviewed in the script source and are believed correct but
@@ -278,7 +278,25 @@ that refreshes periodically, not a live tick-by-tick feed. Set it up with:
 ```
 setx ALPHA_VANTAGE_API_KEY "..."
 ```
-(free signup: https://www.alphavantage.co/support/#api-key)
+(free signup: https://www.alphavantage.co/support/#api-key — restart any
+already-open terminal/app after running `setx`, since it only updates the
+registry for *new* processes, not ones already running)
+
+**Important correction, found by testing against the live API, not just
+reading the docs:** an earlier version of this integration used
+`TIME_SERIES_INTRADAY` with `extended_hours=true`, based on Alpha Vantage's
+public documentation describing that as a plain optional (free) param. A
+live request against a real free key on 2026-10-04 returned
+`"This is a premium endpoint..."` for `TIME_SERIES_INTRADAY` **regardless**
+of `extended_hours`/`outputsize` — Alpha Vantage has evidently tightened
+the free tier since that doc page was written. **Confirmed still free as of
+the same date: `TIME_SERIES_DAILY` (and `GLOBAL_QUOTE`, not currently
+used).** So every timeframe now requests daily bars — there is no free
+intraday or pre/post-market (extended-hours) candle data from this
+provider, full stop. If you're tempted to "fix" the chart by re-adding
+`extended_hours=true`/`TIME_SERIES_INTRADAY`, don't — re-verify against the
+live API first, since the public docs are demonstrably stale on this exact
+point.
 
 **Disk-backed cache is load-bearing, not optional** — `backend/lib/candle_cache.dart`
 persists fetched candles to a JSON file next to the backend exe
@@ -288,28 +306,34 @@ existing `build/` rule), keyed by symbol+timeframe, default TTL **1 hour**
 `BackendLauncher` spawns a brand-new backend process every time the app
 starts and kills it on close (see Architecture above) — an in-memory-only
 cache would be wiped every single restart, which would burn through a
-~25/day quota in a handful of app relaunches. The disk cache is what makes
-the free tier survive a normal day of actually using the app.
+~25/day quota in a handful of app relaunches. Verified today: a second
+request for the same symbol+timeframe returns `"cached": true` in ~1ms
+with no network call at all, even with the API key unset on that run.
 
 **Known free-tier coverage gaps** (all degrade gracefully — never a crash,
-just a smaller lookback window than the timeframe label implies):
-- `1D`/`1W`/`1M` use `TIME_SERIES_INTRADAY` with `extended_hours=true`
-  (free, not gated — unlike Twelve Data's `prepost`), trimmed client-side
-  in `_trimToTimeframe` to the actual requested window.
-- `6M`/`1Y`/`MAX` use `TIME_SERIES_DAILY`, but that endpoint's
-  `outputsize=full` is **premium-only** on Alpha Vantage — the free
-  `compact` size caps all three at the latest ~100 trading days (~4-5
-  months) no matter which of the three is selected. There's no free way
-  around this short of stitching together many historical `month=`
-  intraday calls, which would exhaust the daily quota on one chart load.
+just a smaller lookback window than the timeframe label implies, since
+every timeframe draws from the same single `TIME_SERIES_DAILY` request):
+- `outputsize=full` is separately documented (and not contradicted by
+  testing) as premium-only on `TIME_SERIES_DAILY`, so the free `compact`
+  size — the latest ~100 trading days, ~4-5 months — is the hard ceiling
+  for every timeframe, not just `6M`/`1Y`/`MAX`.
+- `1D` shows exactly **one** daily candle (the most recent trading day) —
+  not an intraday session, since there is currently no free way to get
+  finer-than-daily granularity at all. `1W` shows the last 5 daily bars,
+  `1M` the last 21 — both are the same daily data, just different tail
+  lengths (`_trimToTimeframe` in `alpha_vantage_client.dart`), not a finer
+  chart. This is a real, visible downgrade from what a paid feed or a
+  TradingView-style view would show — be upfront about it rather than
+  implying the chart is more granular than it is.
 - Candle timestamps are parsed assuming a fixed EST (UTC-5) offset year
   round, since Dart has no bundled IANA timezone database and Alpha
-  Vantage labels its timestamps "US/Eastern" as a naive string. This can
-  be up to 1h off during EDT (~March–November) — only affects the hover
-  tooltip's displayed time, never price values or candle ordering.
+  Vantage labels its timestamps "US/Eastern" as a naive string. For daily
+  bars (no time-of-day component) this barely matters; kept for when/if
+  intraday ever becomes available again.
 - A rate-limit/quota response (HTTP 200 with a `"Note"`/`"Information"`
   key instead of time-series data — Alpha Vantage's actual way of
-  signaling "you're out of calls") is mapped to a distinct
+  signaling "you're out of calls," and also how it reports the
+  premium-endpoint rejection above) is mapped to a distinct
   `rateLimited: true` result so this is recognizable as "try again later,"
   not a generic failure, if the UI is ever extended to show it specially.
 
@@ -700,11 +724,16 @@ clone-to-build gap).
 
 **Same-day follow-up:** replaced the dead Finnhub candle path with Alpha
 Vantage (see Candle Data above) and added `alpha_vantage_client_test.dart`
-+ `candle_cache_test.dart`. `cd backend && dart test` re-run →
-**22/22 passed**. Not re-run against a real Alpha Vantage key/live network
-on this machine (`AlphaVantageClient` was tested against mocked HTTP
-responses only, matching how `finviz_client_test.dart`/`yahoo_client_test.dart`
-already test their own clients) — if the chart still shows an error after
-setting `ALPHA_VANTAGE_API_KEY`, check the backend's stderr output first for
-the exact upstream error/rate-limit message before assuming the integration
-itself is broken.
++ `candle_cache_test.dart`. First implementation used
+`TIME_SERIES_INTRADAY`/`extended_hours=true` per the public docs — a live
+test against a real free key revealed that's actually premium-gated now
+(see Candle Data's correction note), so it was reworked to
+`TIME_SERIES_DAILY` for every timeframe before landing. Verified against
+the **live** Alpha Vantage API (not just mocks) with a real free key:
+`/candles/MSFT?timeframe=1D` returned a real daily candle on the first
+call, and the same request on a second backend process start (simulating
+an app restart, with no API key even set that time) returned the
+disk-cached value (`"cached": true`) in under 1ms with zero network calls
+— confirming both the data source and the restart-surviving cache actually
+work, not just that they compile. `cd backend && dart test` → **26/26
+passed** after the rework.

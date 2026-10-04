@@ -3,12 +3,29 @@
 /// which is why the chart pane always showed "No chart data returned.").
 ///
 /// Alpha Vantage's free tier is a plain email signup, no credit card - but
-/// the trade-off is an extremely tight quota (~25 requests/day per key as
-/// of 2024/2025). See candle_cache.dart for how that budget is protected
-/// across app restarts, and _requestParamsFor below for the per-timeframe
-/// coverage caveats this constraint forces.
+/// two real constraints shape everything below, the second one discovered
+/// by hitting the live API directly (not just reading the docs, which are
+/// stale on this point):
 ///
-/// Docs: https://www.alphavantage.co/documentation/#time-series
+/// 1. An extremely tight quota (~25 requests/day per key). See
+///    candle_cache.dart for how that budget is protected across app
+///    restarts.
+/// 2. **TIME_SERIES_INTRADAY is premium-only on current free keys**,
+///    confirmed via a live request on 2026-10-04 ("This is a premium
+///    endpoint..."), regardless of `extended_hours`/`outputsize` - contrary
+///    to the publicly documented params list, which still describes
+///    `extended_hours` as a plain optional param. Alpha Vantage has
+///    evidently tightened the free tier since that page was written.
+///    **Only `TIME_SERIES_DAILY` (and `GLOBAL_QUOTE`, unused here) are
+///    confirmed free.** So every timeframe below uses daily bars - there is
+///    no free source of intraday or extended-hours (pre/post-market) data
+///    from this provider, or (per CLAUDE.md's Candle Data section) from any
+///    other free provider either. If Alpha Vantage ever re-opens intraday
+///    on free keys, `_requestParamsFor`/`_trimToTimeframe` are the two
+///    places to revisit.
+///
+/// Docs (aspirational for intraday, accurate for daily):
+/// https://www.alphavantage.co/documentation/#time-series
 library;
 
 import 'dart:convert';
@@ -97,54 +114,40 @@ class AlphaVantageClient {
     }
   }
 
-  /// Maps our Timeframe to Alpha Vantage's function/interval/outputsize.
-  /// Free-tier caveat worth knowing: TIME_SERIES_DAILY's `outputsize=full`
-  /// is premium-only, so month6/year1/max are all capped at the free
-  /// `compact` size (the latest ~100 trading days, ~4-5 months) regardless
-  /// of how far back the user asks to see - there's no free way around
-  /// this short of stitching together many `month=` intraday calls, which
-  /// would blow the daily quota instantly for one chart load.
+  /// Every timeframe maps to the same TIME_SERIES_DAILY/compact request -
+  /// see the library doc comment above for why (TIME_SERIES_INTRADAY is
+  /// premium-only on current free keys, confirmed against the live API,
+  /// despite what the public docs say). `outputsize=full` is separately
+  /// documented as premium-only for this endpoint, so `compact` (the
+  /// latest ~100 trading days, ~4-5 months) is the ceiling regardless of
+  /// which timeframe is requested - `_trimToTimeframe` below just decides
+  /// how much of that same ~100-day window to show for each one.
   (String, Map<String, String>) _requestParamsFor(Timeframe timeframe) {
-    switch (timeframe) {
-      case Timeframe.day1:
-        return ('TIME_SERIES_INTRADAY', {'interval': '5min', 'extended_hours': 'true', 'outputsize': 'full'});
-      case Timeframe.week1:
-        return ('TIME_SERIES_INTRADAY', {'interval': '15min', 'extended_hours': 'true', 'outputsize': 'full'});
-      case Timeframe.month1:
-        return ('TIME_SERIES_INTRADAY', {'interval': '60min', 'extended_hours': 'true', 'outputsize': 'full'});
-      case Timeframe.month6:
-      case Timeframe.year1:
-      case Timeframe.max:
-        return ('TIME_SERIES_DAILY', {'outputsize': 'compact'});
-    }
+    return ('TIME_SERIES_DAILY', {'outputsize': 'compact'});
   }
 
-  /// For day1/week1, intraday `outputsize=full` returns up to 30 days of
-  /// bars in one API call - trim down to just the window the timeframe
-  /// asks for so "1D" doesn't render a month of 5-minute candles.
+  /// All timeframes draw from the same ~100 daily bars (see
+  /// _requestParamsFor) - this just trims the tail to a plausible window
+  /// per label, since there's no finer (intraday) granularity available
+  /// for free. day1 in particular is a known honest degradation: it shows
+  /// only the single most recent daily candle, not an intraday session -
+  /// there is currently no free way to show real intraday movement.
   List<Candle> _trimToTimeframe(List<Candle> candles, Timeframe timeframe) {
+    final int tail;
     switch (timeframe) {
       case Timeframe.day1:
-        // Keep only the single most recent trading day present in the
-        // data (grouped by Eastern calendar date, since that's the
-        // timezone Alpha Vantage labels its timestamps in).
-        final lastDate = _easternDateLabel(candles.last.time);
-        return candles.where((c) => _easternDateLabel(c.time) == lastDate).toList();
+        tail = 1;
       case Timeframe.week1:
-        final cutoff = candles.last.time - 7 * 24 * 60 * 60;
-        return candles.where((c) => c.time >= cutoff).toList();
+        tail = 5; // ~1 trading week
       case Timeframe.month1:
+        tail = 21; // ~1 trading month
       case Timeframe.month6:
       case Timeframe.year1:
       case Timeframe.max:
-        return candles;
+        tail = candles.length; // take everything compact returned
     }
-  }
-
-  String _easternDateLabel(int epochSeconds) {
-    final utc = DateTime.fromMillisecondsSinceEpoch(epochSeconds * 1000, isUtc: true);
-    final eastern = utc.subtract(const Duration(hours: 5));
-    return '${eastern.year}-${eastern.month}-${eastern.day}';
+    if (tail >= candles.length) return candles;
+    return candles.sublist(candles.length - tail);
   }
 
   /// Alpha Vantage returns naive "yyyy-MM-dd[ HH:mm:ss]" strings labeled as

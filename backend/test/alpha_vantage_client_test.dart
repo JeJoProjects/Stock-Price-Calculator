@@ -4,59 +4,28 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
-const _intradaySampleJson = '''
-{
-  "Meta Data": {
-    "1. Information": "Intraday (5min) open, high, low, close prices and volume",
-    "2. Symbol": "IBM",
-    "3. Last Refreshed": "2024-01-15 19:55:00",
-    "4. Interval": "5min",
-    "5. Output Size": "Full size",
-    "6. Time Zone": "US/Eastern"
-  },
-  "Time Series (5min)": {
-    "2024-01-15 19:55:00": {
-      "1. open": "123.60",
-      "2. high": "123.70",
-      "3. low": "123.55",
-      "4. close": "123.65",
-      "5. volume": "500"
-    },
-    "2024-01-15 09:30:00": {
-      "1. open": "123.45",
-      "2. high": "123.67",
-      "3. low": "123.20",
-      "4. close": "123.50",
-      "5. volume": "1000000"
-    },
-    "2024-01-14 15:55:00": {
-      "1. open": "122.00",
-      "2. high": "122.50",
-      "3. low": "121.80",
-      "4. close": "122.30",
-      "5. volume": "800000"
-    }
-  }
-}
-''';
-
+// A trimmed-but-real-shaped TIME_SERIES_DAILY response. Every Timeframe
+// uses this same endpoint now - see alpha_vantage_client.dart's doc
+// comment for why TIME_SERIES_INTRADAY (used in an earlier version of
+// this client) turned out to be premium-only on current free keys,
+// despite what Alpha Vantage's public docs say.
 const _dailySampleJson = '''
 {
   "Meta Data": {
     "1. Information": "Daily Prices (open, high, low, close) and Volumes",
     "2. Symbol": "IBM",
-    "3. Last Refreshed": "2024-01-15",
+    "3. Last Refreshed": "2024-01-10",
     "4. Output Size": "Compact",
     "5. Time Zone": "US/Eastern"
   },
   "Time Series (Daily)": {
-    "2024-01-15": {
-      "1. open": "123.45",
-      "2. high": "123.67",
-      "3. low": "123.20",
-      "4. close": "123.50",
-      "5. volume": "1000000"
-    }
+    "2024-01-10": {"1. open": "110", "2. high": "111", "3. low": "109", "4. close": "110.5", "5. volume": "10"},
+    "2024-01-09": {"1. open": "109", "2. high": "110", "3. low": "108", "4. close": "109.5", "5. volume": "9"},
+    "2024-01-08": {"1. open": "108", "2. high": "109", "3. low": "107", "4. close": "108.5", "5. volume": "8"},
+    "2024-01-05": {"1. open": "107", "2. high": "108", "3. low": "106", "4. close": "107.5", "5. volume": "7"},
+    "2024-01-04": {"1. open": "106", "2. high": "107", "3. low": "105", "4. close": "106.5", "5. volume": "6"},
+    "2024-01-03": {"1. open": "105", "2. high": "106", "3. low": "104", "4. close": "105.5", "5. volume": "5"},
+    "2024-01-02": {"1. open": "104", "2. high": "105", "3. low": "103", "4. close": "104.5", "5. volume": "4"}
   }
 }
 ''';
@@ -67,6 +36,12 @@ const _rateLimitJson = '''
 }
 ''';
 
+const _premiumEndpointJson = '''
+{
+  "Information": "Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to instantly unlock all premium endpoints"
+}
+''';
+
 const _errorJson = '''
 {
   "Error Message": "Invalid API call. Please retry or visit the documentation."
@@ -74,47 +49,78 @@ const _errorJson = '''
 ''';
 
 void main() {
-  test('parses intraday series, sorts ascending, and keeps only the latest trading day for day1', () async {
+  test('always requests TIME_SERIES_DAILY/compact, regardless of timeframe', () async {
+    for (final tf in Timeframe.values) {
+      final client = AlphaVantageClient(
+        apiKey: 'test-key',
+        httpClient: MockClient((request) async {
+          expect(request.url.host, 'www.alphavantage.co');
+          expect(request.url.queryParameters['function'], 'TIME_SERIES_DAILY');
+          expect(request.url.queryParameters['outputsize'], 'compact');
+          expect(request.url.queryParameters['symbol'], 'IBM');
+          expect(request.url.queryParameters['apikey'], 'test-key');
+          return http.Response(_dailySampleJson, 200);
+        }),
+      );
+      final result = await client.fetchCandles('IBM', tf);
+      expect(result.isOk, isTrue, reason: 'failed for $tf');
+    }
+  });
+
+  test('parses daily series sorted ascending by time', () async {
     final client = AlphaVantageClient(
       apiKey: 'test-key',
-      httpClient: MockClient((request) async {
-        expect(request.url.host, 'www.alphavantage.co');
-        expect(request.url.queryParameters['function'], 'TIME_SERIES_INTRADAY');
-        expect(request.url.queryParameters['symbol'], 'IBM');
-        expect(request.url.queryParameters['interval'], '5min');
-        expect(request.url.queryParameters['extended_hours'], 'true');
-        expect(request.url.queryParameters['apikey'], 'test-key');
-        return http.Response(_intradaySampleJson, 200);
-      }),
+      httpClient: MockClient((request) async => http.Response(_dailySampleJson, 200)),
+    );
+
+    final result = await client.fetchCandles('IBM', Timeframe.max);
+
+    expect(result.isOk, isTrue);
+    final candles = result.value!;
+    expect(candles, hasLength(7));
+    expect(candles.first.open, 104);
+    expect(candles.last.open, 110);
+    for (var i = 1; i < candles.length; i++) {
+      expect(candles[i].time, greaterThan(candles[i - 1].time));
+    }
+  });
+
+  test('day1 keeps only the single most recent daily bar', () async {
+    final client = AlphaVantageClient(
+      apiKey: 'test-key',
+      httpClient: MockClient((request) async => http.Response(_dailySampleJson, 200)),
     );
 
     final result = await client.fetchCandles('IBM', Timeframe.day1);
 
     expect(result.isOk, isTrue);
-    final candles = result.value!;
-    // Only the two 2024-01-15 bars should survive the day1 trim, and in
-    // ascending time order.
-    expect(candles, hasLength(2));
-    expect(candles[0].open, 123.45);
-    expect(candles[1].open, 123.60);
-    expect(candles[0].time, lessThan(candles[1].time));
+    expect(result.value, hasLength(1));
+    expect(result.value!.single.open, 110);
   });
 
-  test('parses a daily series for month6/year1/max', () async {
+  test('week1 keeps the last 5 trading days', () async {
     final client = AlphaVantageClient(
       apiKey: 'test-key',
-      httpClient: MockClient((request) async {
-        expect(request.url.queryParameters['function'], 'TIME_SERIES_DAILY');
-        expect(request.url.queryParameters['outputsize'], 'compact');
-        return http.Response(_dailySampleJson, 200);
-      }),
+      httpClient: MockClient((request) async => http.Response(_dailySampleJson, 200)),
     );
 
-    final result = await client.fetchCandles('IBM', Timeframe.year1);
+    final result = await client.fetchCandles('IBM', Timeframe.week1);
 
     expect(result.isOk, isTrue);
-    expect(result.value, hasLength(1));
-    expect(result.value!.first.close, 123.50);
+    expect(result.value, hasLength(5));
+    expect(result.value!.first.open, 106); // 2024-01-04 onward (last 5 of 7 bars)
+  });
+
+  test('month6/year1/max all return everything compact gave back (same ~100-day cap)', () async {
+    final client = AlphaVantageClient(
+      apiKey: 'test-key',
+      httpClient: MockClient((request) async => http.Response(_dailySampleJson, 200)),
+    );
+
+    for (final tf in [Timeframe.month6, Timeframe.year1, Timeframe.max]) {
+      final result = await client.fetchCandles('IBM', tf);
+      expect(result.value, hasLength(7), reason: 'failed for $tf');
+    }
   });
 
   test('maps a quota-exceeded response to a rate-limited error, not a crash', () async {
@@ -128,6 +134,18 @@ void main() {
     expect(result.isOk, isFalse);
     expect(result.rateLimited, isTrue);
     expect(result.error, contains('try again later'));
+  });
+
+  test('maps a premium-endpoint response to a rate-limited error too (not a crash)', () async {
+    final client = AlphaVantageClient(
+      apiKey: 'test-key',
+      httpClient: MockClient((request) async => http.Response(_premiumEndpointJson, 200)),
+    );
+
+    final result = await client.fetchCandles('IBM', Timeframe.day1);
+
+    expect(result.isOk, isFalse);
+    expect(result.rateLimited, isTrue);
   });
 
   test('surfaces Alpha Vantage\'s own error message for a bad request', () async {
