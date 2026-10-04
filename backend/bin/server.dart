@@ -5,6 +5,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 
+import 'package:backend/alpha_vantage_client.dart';
+import 'package:backend/candle_cache.dart';
 import 'package:backend/finnhub_client.dart';
 import 'package:backend/finviz_client.dart';
 import 'package:backend/finviz_screener_service.dart';
@@ -29,6 +31,26 @@ void main(List<String> args) async {
 
   final client = FinnhubClient(apiKey: apiKey);
   final symbolSearch = SymbolSearchClient();
+
+  // Finnhub's /stock/candle moved behind a paid plan on newer accounts
+  // (see finnhub_client.dart's KNOWN RISK note) - candle/OHLC data comes
+  // from Alpha Vantage's free tier instead (see alpha_vantage_client.dart).
+  // Finnhub above still handles quote/profile, which remain free.
+  final alphaVantageKey = Platform.environment['ALPHA_VANTAGE_API_KEY'] ?? '';
+  if (alphaVantageKey.isEmpty) {
+    stderr.writeln(
+        'WARNING: ALPHA_VANTAGE_API_KEY is not set. The chart\'s candle data will be unavailable until it is configured.');
+  }
+  final alphaVantageClient = AlphaVantageClient(apiKey: alphaVantageKey);
+  // Alpha Vantage's free tier is roughly 25 requests/day - this disk-backed
+  // cache (survives app restarts, unlike an in-memory map - see
+  // candle_cache.dart) is what makes that quota usable across a normal day
+  // instead of being exhausted after a handful of chart loads.
+  final cacheTtlSeconds = int.tryParse(Platform.environment['ALPHA_VANTAGE_CACHE_SECONDS'] ?? '') ?? 3600;
+  final candleCache = CandleCache(
+    path: '${File(Platform.resolvedExecutable).parent.path}/alpha_vantage_cache.json',
+    ttl: Duration(seconds: cacheTtlSeconds),
+  );
 
   // The screener panel is fed straight from Finviz's and Yahoo's free
   // screener pages/APIs (finviz_client.dart, yahoo_client.dart) - no account
@@ -66,8 +88,15 @@ void main(List<String> args) async {
     ..get('/candles/<symbol>', (Request req, String symbol) async {
       final label = req.url.queryParameters['timeframe'] ?? '1D';
       final timeframe = TimeframeInfo.fromLabel(label);
-      final result = await client.fetchCandles(symbol, timeframe);
+
+      final cached = await candleCache.get(symbol, timeframe);
+      if (cached != null) {
+        return _json({'candles': cached.map((c) => c.toJson()).toList(), 'cached': true});
+      }
+
+      final result = await alphaVantageClient.fetchCandles(symbol, timeframe);
       if (!result.isOk) return _json({'error': result.error}, status: 502);
+      await candleCache.set(symbol, timeframe, result.value!);
       return _json({'candles': result.value!.map((c) => c.toJson()).toList()});
     })
     ..get('/search', (Request req) async {

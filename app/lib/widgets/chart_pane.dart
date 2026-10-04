@@ -7,8 +7,12 @@ import '../theme/app_theme.dart';
 
 /// Ported from Application::renderChartPane (application.cpp:880-1163):
 /// timeframe controls, candlestick canvas with hover tooltip, quote strip,
-/// and quote-details section. Needs a real Finnhub key on the backend to
-/// show live data - the empty/error states are otherwise fully functional.
+/// and quote-details section. Needs real API keys on the backend to show
+/// live data - FINNHUB_API_KEY for the quote strip/market cap (fetchQuote/
+/// fetchProfile), ALPHA_VANTAGE_API_KEY for the candlestick chart itself
+/// (see backend/lib/alpha_vantage_client.dart - Finnhub's own candle
+/// endpoint is now paywalled). The empty/error states are otherwise fully
+/// functional without either key.
 class ChartPane extends StatefulWidget {
   final String? symbol;
   final String companyName;

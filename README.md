@@ -52,7 +52,7 @@ Requires Python 3.11+ and downloads PaddleOCR/PaddlePaddle (several hundred MB t
 
 ## Notes
 
-- Set `FINNHUB_API_KEY` before starting the backend if you want live quotes, charts, and the screener.
+- Set `FINNHUB_API_KEY` (free, from finnhub.io) for the quote strip/market cap, and `ALPHA_VANTAGE_API_KEY` (free, from alphavantage.co, no card) for the candlestick chart — Finnhub's own candle endpoint is now paywalled. The screener (Finviz/Yahoo) needs neither key. See CLAUDE.md's Candle Data section for the free-tier quota tradeoff.
 - The Windows build output is written to `app\build\windows\x64\runner\Release\stockcalc.exe`.
 - Only source and app data belong in git; generated SDK copies and build output stay ignored.
 - If Flutter plugins fail with a symlink error, enable Windows Developer Mode before building.

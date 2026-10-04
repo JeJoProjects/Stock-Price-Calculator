@@ -5,8 +5,9 @@
 **Stock Screener** is a Flutter + Dart desktop app, built and verified on
 Windows: a stock investment profit calculator (multiple purchases, combined
 stats, smart field inference, US symbol search) combined with a live
-Finviz/Yahoo micro-cap movers screener, a Finnhub-backed quote/chart pane,
-and a local OCR tab. TradingView-inspired dark theme throughout.
+Finviz/Yahoo micro-cap movers screener, a Finnhub quote-strip + Alpha
+Vantage candlestick chart pane, and a local OCR tab. TradingView-inspired
+dark theme throughout.
 
 > *"If I buy X shares at price Y and the price reaches Z, how much profit do
 > I make?"* — plus *"what's moving right now?"* and *"get me the text out of
@@ -23,11 +24,12 @@ CMake, or `src/*.cpp` elsewhere.
 **Last verified:** 2026-10-04. `setup_flutter.bat`/`run_flutter.bat` were
 actually executed end-to-end on a clean-ish Windows checkout (not just read),
 `flutter analyze` ran clean (0 issues), and the full test suite was run for
-real: 48/48 app tests pass (`cd app && flutter test`), 12/12 backend tests
-pass (`cd backend && dart test`). Android/Linux/iOS build paths were
-reviewed in the script source and are believed correct but **not**
-execution-tested on this machine (no Android SDK installed here; Linux/iOS
-targets structurally cannot be built from a Windows host at all — see
+real: 48/48 app tests pass (`cd app && flutter test`), 22/22 backend tests
+pass (`cd backend && dart test`, including new Alpha Vantage client/candle
+cache coverage added the same day — see Candle Data below). Android/Linux/iOS
+build paths were reviewed in the script source and are believed correct but
+**not** execution-tested on this machine (no Android SDK installed here;
+Linux/iOS targets structurally cannot be built from a Windows host at all — see
 below).
 
 ---
@@ -131,16 +133,20 @@ flutter build windows
 cd app
 flutter test        :: 48 tests - verified passing today
 cd ../backend
-dart test            :: 12 tests - verified passing today
+dart test            :: 22 tests - verified passing today
 ```
 App side: `calc_engine_test.dart`, `formatting_test.dart`,
 `market_types_test.dart`, `search_engine_test.dart`, `widget_test.dart`, and
 `test/ocr/*` (file classification, Excel extraction, sidecar HTTP client).
-Backend side (not previously documented here): `finviz_client_test.dart`
-(real scraped-markup parsing, including Finviz's ticker-avatar-span HTML
-pollution), `server_test.dart` (health check, all three screener endpoints
-responding before their first poll completes, 404 handling),
-`yahoo_client_test.dart`.
+Backend side: `finviz_client_test.dart` (real scraped-markup parsing,
+including Finviz's ticker-avatar-span HTML pollution), `server_test.dart`
+(health check, all three screener endpoints responding before their first
+poll completes, 404 handling), `yahoo_client_test.dart`,
+`alpha_vantage_client_test.dart` (intraday/daily parsing, day1's
+latest-trading-day trim, rate-limit detection, Alpha Vantage's own error
+messages, missing-key guard), `candle_cache_test.dart` (TTL expiry,
+per-symbol/timeframe keying, persistence across separate instances pointed
+at the same file — i.e. across app restarts).
 
 `flutter analyze` (run from `app/`) must stay at 0 issues — verified clean
 today.
@@ -198,8 +204,10 @@ process**, not in the Flutter app. The app only ever talks to
 `http://localhost:8090` (its own backend). Specifically:
 
 - `app/lib/market/market_client.dart` calls the backend's `/quote`,
-  `/profile`, `/candles` routes — the backend's `finnhub_client.dart` is the
-  only thing that ever sees `FINNHUB_API_KEY` or talks to Finnhub.
+  `/profile`, `/candles` routes — the backend's `finnhub_client.dart` (quote/
+  profile) and `alpha_vantage_client.dart` (candles — see Candle Data below)
+  are the only things that ever see `FINNHUB_API_KEY`/`ALPHA_VANTAGE_API_KEY`
+  or talk to those providers.
 - `app/lib/screener/screener_hub.dart` polls the backend's `/screener/*`
   routes — `backend/lib/finviz_client.dart` and `backend/lib/yahoo_client.dart`
   are the only things that scrape Finviz/Yahoo.
@@ -242,11 +250,68 @@ Binds `InternetAddress.anyIPv4`, port from `PORT` env var (default **8090**).
 | `/health` | GET | `{"status":"ok"}` — used by `BackendLauncher.ensureRunning()` |
 | `/quote/<symbol>` | GET | Proxies Finnhub quote; 502 on upstream failure |
 | `/profile/<symbol>` | GET | Proxies Finnhub company profile; 502 on failure |
-| `/candles/<symbol>?timeframe=` | GET | Proxies Finnhub candles; 502 on failure |
+| `/candles/<symbol>?timeframe=` | GET | Serves OHLC candles from Alpha Vantage (free tier), disk-cached — see Candle Data below; 502 on failure |
 | `/search?q=&max=` | GET | Proxies Yahoo autocomplete via `symbol_search.dart` |
 | `/screener/finviz` | GET | Returns Finviz service's cached `latest`/`lastUpdated`/`lastError` |
 | `/screener/yahoo` | GET | Same, for the Yahoo service |
 | `/screener/combined` | GET | **Intersection** (not union) of symbols present in both Finviz's and Yahoo's latest snapshots; Finviz's fields take precedence on overlap; sorted by `changePercent` descending |
+
+### Candle Data (the chart's OHLC source)
+
+The candlestick chart on the right side of the Calculator tab was silently
+broken before this was fixed: Finnhub moved its `/stock/candle` endpoint
+behind a paid plan on newer accounts, so every chart load failed with "No
+chart data returned." regardless of API key validity. `finnhub_client.dart`
+still carries that method (kept for reference, flagged as dead/unused in
+its doc comment), but nothing calls it anymore.
+
+**Replacement: Alpha Vantage's free tier** (`backend/lib/alpha_vantage_client.dart`,
+routed from `/candles` in `bin/server.dart`). Chosen deliberately over
+Twelve Data: Twelve Data's free tier has a much higher daily quota
+(800/day) but its extended-hours (`prepost`) flag is Pro-plan-only, and
+there was no way to confirm from their docs alone whether free signup ever
+asks for a card. Alpha Vantage is a known plain-email signup, no card,
+ever — at the cost of a much tighter quota (~25 requests/day per key).
+**True TradingView-style live/streaming data is not achievable for free
+from any provider** — this is the realistic ceiling: a real OHLC chart
+that refreshes periodically, not a live tick-by-tick feed. Set it up with:
+```
+setx ALPHA_VANTAGE_API_KEY "..."
+```
+(free signup: https://www.alphavantage.co/support/#api-key)
+
+**Disk-backed cache is load-bearing, not optional** — `backend/lib/candle_cache.dart`
+persists fetched candles to a JSON file next to the backend exe
+(`.../Release/backend/alpha_vantage_cache.json`, gitignored via the
+existing `build/` rule), keyed by symbol+timeframe, default TTL **1 hour**
+(`ALPHA_VANTAGE_CACHE_SECONDS` env var to change it). This exists because
+`BackendLauncher` spawns a brand-new backend process every time the app
+starts and kills it on close (see Architecture above) — an in-memory-only
+cache would be wiped every single restart, which would burn through a
+~25/day quota in a handful of app relaunches. The disk cache is what makes
+the free tier survive a normal day of actually using the app.
+
+**Known free-tier coverage gaps** (all degrade gracefully — never a crash,
+just a smaller lookback window than the timeframe label implies):
+- `1D`/`1W`/`1M` use `TIME_SERIES_INTRADAY` with `extended_hours=true`
+  (free, not gated — unlike Twelve Data's `prepost`), trimmed client-side
+  in `_trimToTimeframe` to the actual requested window.
+- `6M`/`1Y`/`MAX` use `TIME_SERIES_DAILY`, but that endpoint's
+  `outputsize=full` is **premium-only** on Alpha Vantage — the free
+  `compact` size caps all three at the latest ~100 trading days (~4-5
+  months) no matter which of the three is selected. There's no free way
+  around this short of stitching together many historical `month=`
+  intraday calls, which would exhaust the daily quota on one chart load.
+- Candle timestamps are parsed assuming a fixed EST (UTC-5) offset year
+  round, since Dart has no bundled IANA timezone database and Alpha
+  Vantage labels its timestamps "US/Eastern" as a naive string. This can
+  be up to 1h off during EDT (~March–November) — only affects the hover
+  tooltip's displayed time, never price values or candle ordering.
+- A rate-limit/quota response (HTTP 200 with a `"Note"`/`"Information"`
+  key instead of time-series data — Alpha Vantage's actual way of
+  signaling "you're out of calls") is mapped to a distinct
+  `rateLimited: true` result so this is recognizable as "try again later,"
+  not a generic failure, if the UI is ever extended to show it specially.
 
 ### Key Files
 
@@ -283,12 +348,24 @@ app/
 └── assets/data/us_tickers_full.json  Copied in by the build scripts from data/
 
 backend/                              Dart `shelf` server: Finviz/Yahoo
-                                      scraping, Finnhub proxy, symbol search.
-                                      Compiled to an exe and bundled next to
-                                      the app (see setup_flutter.bat). All
-                                      external network calls in the whole
-                                      app happen here - see Architecture.
-backend/test/                         12 passing tests (see Tests above).
+                                      scraping, Finnhub quote/profile proxy,
+                                      Alpha Vantage candle proxy (see Candle
+                                      Data above), symbol search. Compiled
+                                      to an exe and bundled next to the app
+                                      (see setup_flutter.bat). All external
+                                      network calls in the whole app happen
+                                      here - see Architecture.
+  ├── lib/finnhub_client.dart         Quote/profile only now - fetchCandles
+  │                                   is dead code (Finnhub's candle
+  │                                   endpoint is paywalled), kept for
+  │                                   reference.
+  ├── lib/alpha_vantage_client.dart   Free-tier OHLC candle source - see
+  │                                   Candle Data above for the coverage
+  │                                   caveats this forces.
+  └── lib/candle_cache.dart           Disk-backed cache protecting Alpha
+                                      Vantage's ~25/day quota across app
+                                      restarts.
+backend/test/                         22 passing tests (see Tests above).
 
 pyocr/                                Python PaddleOCR sidecar (optional,
                                       higher-accuracy OCR engine):
@@ -541,13 +618,16 @@ that port, check this first rather than assuming it's "just like Windows."
   results from the backend's `/search` (always ranked above offline matches).
   Deliberately simplified vs. the old C++ app's binary-search approach since
   the dataset is only ~200 tickers.
-- Finnhub is the live-quote/chart/profile provider, proxied through the
+- Finnhub is the quote-strip/market-cap provider, proxied through the
   backend (`backend/lib/finnhub_client.dart`) — the Flutter app never calls
-  Finnhub directly (see Architecture above). The API key is read from the
-  `FINNHUB_API_KEY` environment variable **by the backend process**, set
-  persistently with `setx` (not just for the current session), so the
-  backend exe picks it up even when `stockcalc.exe` is launched directly
-  from Explorer rather than via `run_flutter.bat`.
+  Finnhub directly (see Architecture above). Alpha Vantage is the
+  candlestick-chart provider (`backend/lib/alpha_vantage_client.dart`) —
+  see Candle Data above for why, and its free-tier tradeoffs. Both API keys
+  are read **by the backend process only**, from `FINNHUB_API_KEY` and
+  `ALPHA_VANTAGE_API_KEY` respectively, set persistently with `setx` (not
+  just for the current session), so the backend exe picks them up even
+  when `stockcalc.exe` is launched directly from Explorer rather than via
+  `run_flutter.bat`.
 - Finviz/Yahoo screener scraping happens entirely in the backend
   (`backend/lib/finviz_client.dart`, `backend/lib/yahoo_client.dart`); the
   app's `screener/` module only polls the backend's cache. See the two-tier
@@ -617,3 +697,14 @@ Nothing above required a manual path edit, a pre-existing Flutter install,
 or any step outside the two batch scripts (beyond closing the stale
 process, which is a one-time gotcha worth fixing in the script, not a
 clone-to-build gap).
+
+**Same-day follow-up:** replaced the dead Finnhub candle path with Alpha
+Vantage (see Candle Data above) and added `alpha_vantage_client_test.dart`
++ `candle_cache_test.dart`. `cd backend && dart test` re-run →
+**22/22 passed**. Not re-run against a real Alpha Vantage key/live network
+on this machine (`AlphaVantageClient` was tested against mocked HTTP
+responses only, matching how `finviz_client_test.dart`/`yahoo_client_test.dart`
+already test their own clients) — if the chart still shows an error after
+setting `ALPHA_VANTAGE_API_KEY`, check the backend's stderr output first for
+the exact upstream error/rate-limit message before assuming the integration
+itself is broken.

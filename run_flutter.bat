@@ -124,11 +124,18 @@ rem The app starts the bundled backend exe itself (see
 rem app/lib/core/backend_launcher.dart) and stops it again on close, so
 rem there's no separate server process to start/stop by hand anymore.
 if "%FINNHUB_API_KEY%"=="" (
-    echo NOTE: FINNHUB_API_KEY is not set for this session - quotes, charts,
-    echo and the screener will be unavailable until it is. Set it as a
+    echo NOTE: FINNHUB_API_KEY is not set for this session - the quote strip
+    echo and market cap will be unavailable until it is. Set it as a
     echo persistent environment variable ^(setx FINNHUB_API_KEY "..."^) so it's
     echo picked up even when launching stockcalc.exe directly, not just from
     echo this script.
+)
+if "%ALPHA_VANTAGE_API_KEY%"=="" (
+    echo NOTE: ALPHA_VANTAGE_API_KEY is not set for this session - the
+    echo candlestick chart will be unavailable until it is ^(Finnhub's own
+    echo candle endpoint is now paywalled^). Free signup, no card required:
+    echo https://www.alphavantage.co/support/#api-key - then
+    echo setx ALPHA_VANTAGE_API_KEY "..."
 )
 start "" "app\build\windows\x64\runner\Release\stockcalc.exe"
 

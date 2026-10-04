@@ -2,11 +2,15 @@
 /// JSON decoding instead of raw WinHTTP + hand-rolled substring scanning
 /// (the old client was Windows-only and had no real JSON parser).
 ///
-/// KNOWN RISK (flagged in the migration plan): Finnhub's /stock/candle
-/// endpoint has moved behind a paid plan on newer accounts. fetchCandles
-/// will surface that as an error string rather than throwing, matching the
-/// old app's "No chart data returned." behavior, so callers can degrade
-/// gracefully.
+/// fetchQuote/fetchProfile are still live and used by bin/server.dart.
+///
+/// fetchCandles below is UNUSED/dead code as of the Alpha Vantage switch:
+/// Finnhub's /stock/candle endpoint moved behind a paid plan on newer
+/// accounts, so every candle request failed with "No chart data
+/// returned." - see alpha_vantage_client.dart (the replacement, routed
+/// from bin/server.dart's /candles route) for the free-tier OHLC source
+/// now actually in use. Kept here for reference/in case Finnhub's candle
+/// endpoint ever becomes free again, not dead-code-removed outright.
 library;
 
 import 'dart:convert';

@@ -126,10 +126,13 @@ echo.
 echo Build complete: app\build\windows\x64\runner\Release\stockcalc.exe
 echo stockcalc.exe now starts and stops the bundled backend automatically -
 echo just double-click it, no separate server step needed.
-echo Set FINNHUB_API_KEY as a persistent environment variable ^(setx
-echo FINNHUB_API_KEY "..."^) to enable live quotes, charts, and the
-echo micro-cap screener - a session-only value won't be picked up when
-echo launching the exe directly from Explorer.
+echo Set these as persistent environment variables ^(setx, not just for
+echo this session, so stockcalc.exe picks them up when launched directly
+echo from Explorer too^):
+echo   setx FINNHUB_API_KEY "..."        - quote strip / market cap
+echo   setx ALPHA_VANTAGE_API_KEY "..."  - the candlestick chart itself
+echo ^(Finnhub's own candle endpoint is now paywalled - Alpha Vantage's
+echo free tier replaces it, with a ~25 requests/day quota; see CLAUDE.md.^)
 echo Run run_flutter.bat any time you want an incremental rebuild + launch.
 endlocal
 exit /b 0

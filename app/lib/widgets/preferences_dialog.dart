@@ -54,7 +54,7 @@ class _PreferencesContentState extends State<_PreferencesContent> {
               labelColor: AppColors.accentBlue,
               unselectedLabelColor: AppColors.textMuted,
               indicatorColor: AppColors.accentBlue,
-              tabs: [Tab(text: 'Appearance'), Tab(text: 'Display'), Tab(text: 'Finnhub')],
+              tabs: [Tab(text: 'Appearance'), Tab(text: 'Display'), Tab(text: 'Market Data')],
             ),
             Expanded(
               child: TabBarView(
@@ -163,11 +163,15 @@ class _PreferencesContentState extends State<_PreferencesContent> {
     return const Padding(
       padding: EdgeInsets.all(20),
       child: Text(
-        'The Finnhub API key now lives on the backend server only '
-        '(set FINNHUB_API_KEY before starting backend/bin/server.dart) - '
-        'the app never sees or stores it, so there is nothing to configure '
-        'here anymore. This also means one key serves every client instead '
-        'of each install needing its own.',
+        'Market data API keys live on the backend server only - the app '
+        'never sees or stores them, so there is nothing to configure here '
+        'anymore. Set them as persistent environment variables (setx), '
+        'then restart the app:\n\n'
+        'FINNHUB_API_KEY - quote strip and market cap (Finnhub free tier).\n'
+        'ALPHA_VANTAGE_API_KEY - the candlestick chart itself (Finnhub\'s '
+        'own candle endpoint is now paywalled; Alpha Vantage\'s free tier '
+        'replaces it, though its ~25 requests/day quota means the chart '
+        'can only refresh occasionally - see CLAUDE.md).',
         style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
       ),
     );
