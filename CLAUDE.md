@@ -2,11 +2,11 @@
 
 ## What This Project Does
 
-**Stock Screener** is a Flutter + Dart Windows desktop app: a stock investment
-profit calculator (multiple purchases, combined stats, smart field inference,
-US symbol search) combined with a live Finviz/Yahoo micro-cap movers screener,
-a Finnhub-backed quote/chart pane, and a local OCR tab. TradingView-inspired
-dark theme throughout.
+**Stock Screener** is a Flutter + Dart desktop app, built and verified on
+Windows: a stock investment profit calculator (multiple purchases, combined
+stats, smart field inference, US symbol search) combined with a live
+Finviz/Yahoo micro-cap movers screener, a Finnhub-backed quote/chart pane,
+and a local OCR tab. TradingView-inspired dark theme throughout.
 
 > *"If I buy X shares at price Y and the price reaches Z, how much profit do
 > I make?"* — plus *"what's moving right now?"* and *"get me the text out of
@@ -20,15 +20,71 @@ retired leftovers, not part of the current app. If you're orienting yourself
 in this repo, trust this file and `README.md`, not stale references to ImGui,
 CMake, or `src/*.cpp` elsewhere.
 
+**Last verified:** 2026-10-04. `setup_flutter.bat`/`run_flutter.bat` were
+actually executed end-to-end on a clean-ish Windows checkout (not just read),
+`flutter analyze` ran clean (0 issues), and the full test suite was run for
+real: 48/48 app tests pass (`cd app && flutter test`), 12/12 backend tests
+pass (`cd backend && dart test`). Android/Linux/iOS build paths were
+reviewed in the script source and are believed correct but **not**
+execution-tested on this machine (no Android SDK installed here; Linux/iOS
+targets structurally cannot be built from a Windows host at all — see
+below).
+
+---
+
+## Known Repo Cruft (flagged, not yet removed)
+
+These are confirmed dead leftovers from the pre-Flutter C++ app, still
+tracked in git. Nothing currently depends on them — safe to delete, but left
+in place pending an explicit go-ahead since removing tracked files is a
+deliberate action, not a side effect of a docs rewrite:
+
+- **`scripts/search_symbols.py`** — the old C++ app's Python search bridge.
+  Fully superseded: `app/lib/search/online_search_client.dart`'s own doc
+  comment says it "replac[es] the old app's Python-subprocess bridge
+  entirely," and `backend/lib/symbol_search.dart`'s doc comment says it was
+  "ported from `scripts/search_symbols.py`'s Yahoo Finance bridge, moved
+  server-side." Nothing calls this script anymore.
+- **`ToDo.txt`** — not a task list. It's an accidentally-committed AI
+  assistant session transcript (a recap of an unrelated git stash/pull
+  operation). Added in commit `b33f3c1 "Add stray session log file"` — the
+  commit message already admits it was a mistake.
+- **`external/imgui/`, `external/glfw/`, top-level `build/`** — retired
+  CMake/Dear ImGui build tree from the C++ app. Gitignored (`build/`,
+  `external/` are both in `.gitignore`), so they don't pollute clones, but
+  they're still sitting on disk here. Harmless to delete locally.
+- **`stockcalc_settings.json`** (repo root and inside `build/`) — the old
+  C++ app's hand-rolled settings file. Gitignored, superseded by
+  `shared_preferences` (see Settings Persistence below). Harmless leftover.
+- **`patches/pdfrx-1.3.4/CLAUDE.md`** — this is the **upstream pdfrx
+  package's own** `CLAUDE.md` (its ffigen/release-process notes), vendored
+  in along with the rest of the package source. It documents *pdfrx*, not
+  *this repo* — don't confuse it with the file you're reading, and don't
+  merge its content in here.
+
 ---
 
 ## How to Build & Run
 
-### Quick Start (Windows, default target)
+### Quick Start (Windows, default and primary target)
 ```bat
 setup_flutter.bat                  :: First-time bootstrap + full build
 run_flutter.bat                    :: Incremental rebuild + launch
 ```
+Verified today: a fresh `run_flutter.bat` run resolves the Flutter SDK,
+`dart pub get` + `dart compile exe`s the backend, `flutter pub get` +
+`flutter build windows`s the app, detects Tesseract, and launches
+`stockcalc.exe` — all with no manual steps, confirming the "one clone, one
+script, it just works" property this script is designed around.
+
+**Gotcha confirmed by testing:** if `stockcalc.exe`/`stockcalc_backend.exe`
+from a previous run are still running, `dart compile exe` fails with
+`PathAccessException: ... being used by another process` because it can't
+overwrite the locked backend exe. Close any previously-launched instance
+(Task Manager, or `Stop-Process -Name stockcalc,stockcalc_backend`) before
+re-running the script. This isn't handled automatically — worth fixing in
+the script if it becomes a recurring annoyance (e.g. have it try to kill its
+own previously-spawned processes by name before compiling).
 
 ### Other targets
 ```bat
@@ -54,6 +110,15 @@ check for/report on the Tesseract OCR engine, and optionally build the
 PaddleOCR sidecar. A fresh clone works through `setup_flutter.bat` alone,
 with no manual path edits — preserve this property in any change here.
 
+### Per-platform build reality (see Platform Notes below for the full picture)
+
+| Platform | Buildable from Windows? | Status |
+|---|---|---|
+| **Windows** | Yes (native) | Primary target. Full feature set: backend self-launch, OCR sidecar, everything. Tested today. |
+| **Android** | Yes (`--android` flag) | `flutter create` scaffolding only, never built on this machine (no Android SDK here). Backend/OCR self-launch are Windows-only — APK runs with screener/chart/OCR tabs in their "unavailable" states unless a hosted backend is wired in separately. |
+| **Linux** | No — must run `setup_flutter.bat --linux`'s printed instructions on an actual Linux host | `flutter create` scaffolding only, never built, never run. Backend/OCR self-launch not ported — `Platform.isWindows` guards in `backend_launcher.dart`/`ocr_sidecar_launcher.dart` mean those tabs would start in "unavailable" state even if the GTK build succeeded. |
+| **macOS / iOS** | No — must build on a Mac with Xcode | Same as Linux: scaffolding exists (`flutter create` default), nothing beyond that has been written or tested. |
+
 ### Manual (for reference — prefer the scripts above)
 ```bat
 cd app
@@ -64,11 +129,21 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test
+flutter test        :: 48 tests - verified passing today
+cd ../backend
+dart test            :: 12 tests - verified passing today
 ```
-48 tests today: `calc_engine_test.dart`, `formatting_test.dart`,
+App side: `calc_engine_test.dart`, `formatting_test.dart`,
 `market_types_test.dart`, `search_engine_test.dart`, `widget_test.dart`, and
 `test/ocr/*` (file classification, Excel extraction, sidecar HTTP client).
+Backend side (not previously documented here): `finviz_client_test.dart`
+(real scraped-markup parsing, including Finviz's ticker-avatar-span HTML
+pollution), `server_test.dart` (health check, all three screener endpoints
+responding before their first poll completes, 404 handling),
+`yahoo_client_test.dart`.
+
+`flutter analyze` (run from `app/`) must stay at 0 issues — verified clean
+today.
 
 ### Requirements
 - **Flutter SDK** (auto-bootstrapped to `external/flutter` if not found)
@@ -80,7 +155,7 @@ flutter test
 
 ## Architecture
 
-**Three independently-optional local processes, one Flutter UI:**
+**Three independently-optional local processes, one Flutter UI, all on Windows today:**
 
 ```
 StockCalcApp (MaterialApp)
@@ -88,18 +163,23 @@ StockCalcApp (MaterialApp)
         ├── Tab "Calculator"
         │     ├── MenuBarRow (File/Edit/View/Help + shortcuts)
         │     ├── TopBar
-        │     ├── SearchBarSection + SearchEngine (offline ticker autocomplete)
+        │     ├── SearchBarSection + SearchEngine (offline ticker autocomplete,
+        │     │     merged with online results proxied through the backend)
         │     ├── ScreenerPanel (Finviz/Yahoo/Combined, its OWN internal
         │     │     TabController — don't confuse with the app-level one)
         │     ├── PurchasePanelCard × N + NewPurchaseCard
-        │     ├── ChartPane (Finnhub quotes/candles)
+        │     ├── ChartPane (Finnhub quotes/candles, via the backend)
         │     └── CombinedStatsBar
         └── Tab "OCR"
               └── OcrPanel — drop/browse/paste → extracted, editable text
   ├── BackendLauncher — self-launches backend/bin/server.dart's compiled
-  │     exe (stockcalc_backend.exe) on localhost:8090, kills it on close
+  │     exe (stockcalc_backend.exe) on localhost:8090, kills it on close.
+  │     Windows-only (no-ops on other platforms via a Platform.isWindows
+  │     guard) — THE reference implementation other self-launched
+  │     processes in this repo copy.
   └── OcrSidecarLauncher — self-launches the PaddleOCR sidecar
-        (pyocr/server.py, PyInstaller-compiled) on 127.0.0.1:8091, if built
+        (pyocr/server.py, PyInstaller-compiled) on 127.0.0.1:8091, if built.
+        Copies BackendLauncher's pattern almost verbatim.
 ```
 
 All three (`stockcalc.exe`'s own screener/chart UI, the Dart backend, the
@@ -109,6 +189,64 @@ the PaddleOCR sidecar nor Tesseract is available, the OCR tab shows "engine
 unavailable" for images (Excel/digital-PDF extraction still works, since
 those never needed OCR). Nothing crashes the rest of the app. **This is a
 deliberate pattern — preserve it in new features.**
+
+### The app never talks to Finnhub, Finviz, or Yahoo directly
+
+A common point of confusion: **all external HTTP calls (Finnhub quotes,
+Finviz scraping, Yahoo scraping/search) happen inside the Dart backend
+process**, not in the Flutter app. The app only ever talks to
+`http://localhost:8090` (its own backend). Specifically:
+
+- `app/lib/market/market_client.dart` calls the backend's `/quote`,
+  `/profile`, `/candles` routes — the backend's `finnhub_client.dart` is the
+  only thing that ever sees `FINNHUB_API_KEY` or talks to Finnhub.
+- `app/lib/screener/screener_hub.dart` polls the backend's `/screener/*`
+  routes — `backend/lib/finviz_client.dart` and `backend/lib/yahoo_client.dart`
+  are the only things that scrape Finviz/Yahoo.
+- `app/lib/search/online_search_client.dart` calls the backend's `/search`
+  route — `backend/lib/symbol_search.dart` is the only thing that calls
+  Yahoo's autocomplete API.
+
+This means `app/lib/market/market_types.dart` and
+`backend/lib/market_types.dart` are **two independent, hand-written mirrors**
+of the same JSON shapes, not a shared module — Dart has no cross-package
+sharing here without introducing a shared package, which doesn't exist.
+Keep both in sync by hand if you change either backend response shape or app
+parsing.
+
+### Two-tier screener refresh cadence (easy to misread)
+
+There are **two independent polling loops**, not one:
+
+1. **Backend → Finviz/Yahoo**: controlled by the `SCREENER_POLL_SECONDS` env
+   var (default 30s, read in `backend/bin/server.dart`). This is how often
+   the backend process re-scrapes the actual external sites and refreshes
+   its in-memory cache.
+2. **App → backend**: controlled by the user-facing "Screener Refresh"
+   setting (`AppSettings.screenerRefreshSeconds`, persisted via
+   `shared_preferences`, also default 30s). This is how often the Flutter
+   app re-polls the backend's *already-cached* snapshot — it never triggers
+   a new scrape on demand.
+
+Setting the app's refresh faster than the backend's poll interval just
+re-fetches the same cached data more often; it doesn't make scraping more
+frequent. If someone reports "the screener refresh setting doesn't seem to
+do anything," check which of these two knobs they actually changed.
+
+### Backend route table (`backend/bin/server.dart`)
+
+Binds `InternetAddress.anyIPv4`, port from `PORT` env var (default **8090**).
+
+| Route | Method | Behavior |
+|---|---|---|
+| `/health` | GET | `{"status":"ok"}` — used by `BackendLauncher.ensureRunning()` |
+| `/quote/<symbol>` | GET | Proxies Finnhub quote; 502 on upstream failure |
+| `/profile/<symbol>` | GET | Proxies Finnhub company profile; 502 on failure |
+| `/candles/<symbol>?timeframe=` | GET | Proxies Finnhub candles; 502 on failure |
+| `/search?q=&max=` | GET | Proxies Yahoo autocomplete via `symbol_search.dart` |
+| `/screener/finviz` | GET | Returns Finviz service's cached `latest`/`lastUpdated`/`lastError` |
+| `/screener/yahoo` | GET | Same, for the Yahoo service |
+| `/screener/combined` | GET | **Intersection** (not union) of symbols present in both Finviz's and Yahoo's latest snapshots; Finviz's fields take precedence on overlap; sorted by `changePercent` descending |
 
 ### Key Files
 
@@ -126,43 +264,72 @@ app/
 │   │   ├── calc_engine.dart          Profit calc, smart field inference
 │   │   ├── formatting.dart           Comma/currency/percent formatting
 │   │   ├── panel_state.dart          Per-panel field state + tracking
-│   │   └── settings_service.dart     JSON preferences persistence
+│   │   └── settings_service.dart     Key/value settings via shared_preferences
+│   │                                 (NOT a hand-managed JSON file - that
+│   │                                 was the old C++ app's approach)
 │   ├── market/                       Finnhub quote/candle client + types
+│   │                                 (talks to the backend, never Finnhub
+│   │                                 directly - see Architecture above)
 │   ├── ocr/                          OCR tab logic (see below)
 │   ├── screener/                     Finviz/Yahoo/Combined polling + models
+│   │                                 (talks to the backend's cache, never
+│   │                                 Finviz/Yahoo directly)
 │   ├── search/                       Offline ticker search + online merge
+│   │                                 (online merge calls the backend's
+│   │                                 /search, which calls Yahoo)
 │   ├── theme/app_theme.dart          AppColors (TradingView dark palette)
 │   └── widgets/                      One widget per UI section
-├── test/                             Dart unit + widget tests
+├── test/                             Dart unit + widget tests (48 passing)
 └── assets/data/us_tickers_full.json  Copied in by the build scripts from data/
 
 backend/                              Dart `shelf` server: Finviz/Yahoo
                                       scraping, Finnhub proxy, symbol search.
                                       Compiled to an exe and bundled next to
-                                      the app (see setup_flutter.bat).
+                                      the app (see setup_flutter.bat). All
+                                      external network calls in the whole
+                                      app happen here - see Architecture.
+backend/test/                         12 passing tests (see Tests above).
 
 pyocr/                                Python PaddleOCR sidecar (optional,
                                       higher-accuracy OCR engine):
-  ├── server.py                       stdlib http.server: GET /health,
-                                      POST /ocr (raw image bytes → JSON)
-  ├── ocr_engine.py                   Lazy-singleton PaddleOCR wrapper
+  ├── server.py                       stdlib ThreadingHTTPServer on
+                                      127.0.0.1:8091 (PORT env overridable):
+                                      GET /health (200 once ready, else 503),
+                                      POST /ocr (raw image bytes, 50MB cap →
+                                      JSON {text, confidence, lines})
+  ├── ocr_engine.py                   Lazy-singleton PaddleOCR wrapper,
+                                      thread-locked; warm_up() loads the
+                                      model on a background daemon thread at
+                                      startup so /health doesn't block on it
   ├── prefetch_models.py              Run once before building, so the
                                       frozen exe ships with models baked in
+                                      (populates the local PaddleOCR model
+                                      cache so the build is fully offline)
   ├── build_sidecar.spec              PyInstaller spec (collect_all for
-                                      paddle/paddleocr/paddlex)
-  └── requirements.txt                paddlepaddle, paddleocr (CPU wheels)
+                                      paddle/paddleocr/paddlex; bundles the
+                                      prefetched model cache into datas)
+  └── requirements.txt                paddlepaddle==2.6.2 (pinned CPU
+                                      wheel), paddleocr==2.9.1, pillow, numpy
 
 patches/pdfrx-1.3.4/                  Locally patched copy of the pdfrx
-                                      package (see its own README.md) - used
-                                      via dependency_overrides in
-                                      app/pubspec.yaml because upstream
-                                      1.3.x has a null-promotion compile bug
-                                      in an http-caching code path this app
-                                      never exercises. Not a fork for
-                                      feature changes - remove the override
-                                      once upstream fixes it or the 2.x line
-                                      stops conflicting with excel's archive
-                                      version constraint.
+                                      package (see its own README.md, NOT
+                                      its own CLAUDE.md which is upstream's
+                                      and irrelevant to this repo) - used via
+                                      dependency_overrides in app/pubspec.yaml
+                                      because upstream 1.3.x has a
+                                      null-promotion compile bug in
+                                      pdf_file_cache.dart (a captured
+                                      nullable `cache` param is null-checked
+                                      once but reused unpromoted later in a
+                                      closure) - an http-caching code path
+                                      this app never exercises, since it only
+                                      calls PdfDocument.openFile. The local
+                                      fix is a one-line rebind
+                                      (`final nonNullCache = cache!;`). Not a
+                                      fork for feature changes - remove the
+                                      override once upstream fixes it or the
+                                      2.x line stops conflicting with
+                                      excel's archive version constraint.
 
 data/us_tickers_full.json             Shared ticker data (app + backend)
 setup_flutter.bat / run_flutter.bat   Build/run entrypoints (see above)
@@ -202,32 +369,44 @@ Second top-level tab. Drag-and-drop, "Browse...", or paste (Ctrl+V while
 hovering the tab, or the Paste button) an image, PDF, or Excel/CSV file —
 including a Snipping Tool screenshot copied straight from the clipboard.
 Result appears in an **editable** text box (not read-only — users can clean
-up OCR'd text before copying) with Copy and Clear buttons.
+up OCR'd text before copying) with Copy and Clear buttons. 50MB file-size cap.
 
-### Routing logic (`app/lib/ocr/`)
+### Routing logic (`app/lib/ocr/ocr_service.dart`)
 
 ```
 OcrService.extract(file)
-  ├── .xlsx/.xls/.csv  → ExcelExtractor      (direct cell read, no OCR)
-  ├── .pdf             → PdfExtractor, per page:
-  │                        text layer present  → direct extraction
-  │                        text layer near-empty → rasterize (pdfrx) → OCR
-  └── image            → ImageRecognizer.recognize(bytes)
+  ├── file is a .pdf           → PdfExtractor, per page:
+  │                                text layer ≥ 8 chars  → direct extraction
+  │                                text layer < 8 chars  → rasterize via
+  │                                                         pdfrx → OCR
+  ├── file classifies as Excel → ExcelExtractor (direct cell read, no OCR)
+  └── file classifies as image → ImageRecognizer.recognize(bytes)
 ```
 
-`ImageRecognizer` (`image_recognizer.dart`) is the abstraction point — two
-implementations exist, and `main.dart`'s `_resolveOcrEngine()` picks one at
-startup:
+Note the `.pdf` check happens *before* classification, and is a complete
+branch on its own — `file_classifier.dart`'s `digitalPdf`/`scannedPdf`/
+`mixedPdf` enum values are only ever produced *inside* `PdfExtractor`'s
+own per-page logic, not consulted by `OcrService`'s top-level routing. If
+you're tracing "how does a PDF get OCR'd," the real branch point is
+`PdfExtractor`'s per-page text-length check, not a switch on file kind.
+
+`ImageRecognizer` (`image_recognizer.dart`) is the abstraction point — a
+single-method abstract class (`recognize(Uint8List) → Future<String>`).
+Two implementations exist, and `main.dart`'s `_resolveOcrEngine()` picks one
+at startup (sidecar tried first, unconditionally, before falling back):
 
 1. **`OcrSidecarClient`** (PaddleOCR via the `pyocr/` sidecar) — preferred
-   when the sidecar is built and its `/health` returns ready. Higher
-   accuracy, especially on stylized/complex layouts and tables.
+   when the sidecar is built and its `/health` on `127.0.0.1:8091` returns
+   ready. Higher accuracy, especially on stylized/complex layouts and
+   tables. HTTP POST to `/ocr` with a 30s timeout; a 503 response maps to
+   `engineUnavailable`, not a hard error.
 2. **`TesseractClient`** — the fallback/default. Shells out to a locally
-   installed `tesseract.exe` (no Python, no sidecar process — just a
-   subprocess call per OCR request). Zero extra setup if Tesseract is
-   already installed (`winget install tesseract-ocr.tesseract`); noticeably
-   rougher than PaddleOCR on colored/stylized layouts, fine on clean
-   printed text.
+   installed `tesseract.exe` (`<in> <outBase> -l eng`, 30s timeout) — no
+   Python, no sidecar process, just a subprocess call per OCR request. It
+   searches a bundled path, then two hardcoded Program Files paths, then
+   `where tesseract` on PATH. Zero extra setup if Tesseract is already
+   installed (`winget install tesseract-ocr.tesseract`); noticeably rougher
+   than PaddleOCR on colored/stylized layouts, fine on clean printed text.
 3. If neither is available: `OcrService(recognizer: null)` — Excel/digital
    PDFs still work, images throw a clean `engineUnavailable` error that the
    UI surfaces as its own state.
@@ -269,12 +448,71 @@ build_sidecar.spec`, and copies the output to
 MB to a few GB and real wall-clock time on first run — this is the single
 heaviest step in the whole build, and is why it's opt-in via a separate
 flag rather than part of the default `run_flutter.bat`/`setup_flutter.bat`
-flow.
+flow. Not rebuilt today's testing pass (Tesseract was used as the active
+engine during verification, per the `run_flutter.bat` output).
 
 PyInstaller + paddlepaddle is known to need explicit `hiddenimports`/
 `binaries`/`datas` handling (`build_sidecar.spec` already does this via
 `collect_all`) — if a frozen build fails to start, that's the first place
 to look.
+
+---
+
+## Platform Notes (detail behind the table above)
+
+### Windows — primary target, fully implemented
+Everything in this document applies as-written. Three-process model
+(app + backend + optional OCR sidecar), all self-launched, all verified
+working today via `run_flutter.bat`.
+
+### Android — buildable from Windows, degraded feature set
+`setup_flutter.bat --android` / `run_flutter.bat --android` run
+`flutter build apk --release` and (for `run_flutter.bat`) `adb install` to
+a connected device/emulator. This is the **only** non-Windows target
+actually buildable *from* a Windows host — Flutter's Android toolchain
+doesn't need platform-matching, unlike Linux desktop or iOS. That said:
+- Not tested on this machine — no Android SDK is installed here
+  (`flutter doctor` flags "Unable to locate Android SDK").
+- `backend_launcher.dart` and `ocr_sidecar_launcher.dart` both guard on
+  `Platform.isWindows` and no-op otherwise, so on Android the screener,
+  chart, and OCR tabs would all show their "unavailable" states — there is
+  no mobile-side backend or OCR engine wired up. The app would run, but
+  only the calculator tab is fully functional.
+- `android/` contains unmodified `flutter create` scaffolding — no custom
+  native code, no signing config beyond defaults.
+
+### Linux — must build on a Linux host
+Flutter cannot cross-compile the GTK-based Linux desktop target from
+Windows; `setup_flutter.bat --linux`/`run_flutter.bat --linux` on Windows
+just print the equivalent commands to run on an actual Linux machine and
+exit. `linux/` contains unmodified `flutter create` scaffolding (its
+`generated_plugin_registrant.cc`/`.cmake` do get refreshed by `flutter pub
+get`, which is why `git status` shows them as modified even though the app
+has never actually been built for Linux — `pub get` touches every
+platform's registrant regardless of which one you build). Even if someone
+built it on a real Linux box today, the backend/OCR self-launch features
+would start in "unavailable" state, same reasoning as Android above — that
+porting work hasn't been done.
+
+### macOS / iOS — must build on a Mac
+Same story as Linux: Apple's toolchain can't run on Windows, no
+cross-compilation path exists, `--ios` just prints instructions for running
+on an actual Mac. `macos/` and `ios/` are both unmodified `flutter create`
+scaffolding; `macos/Flutter/GeneratedPluginRegistrant.swift` shows as
+modified in git for the same `pub get`-touches-everything reason as Linux,
+not because of any real macOS build/test activity.
+
+### A platform detail worth double-checking before relying on it
+`app/windows/flutter/generated_plugin_registrant.cc` and
+`app/linux/flutter/generated_plugins.cmake` both register the same plugin
+set: `desktop_drop`, `irondash_engine_context`, `screen_retriever_*`,
+`super_native_extensions`, `url_launcher_*`, `window_manager`. Notably
+**not** registered on either platform: `file_picker`, `super_clipboard`,
+`pdfrx`, `excel`. These are presumably pure-Dart or FFI-only packages with
+no native plugin registration step on these platforms, but this hasn't been
+independently confirmed against each package's actual platform support —
+if OCR file-picking/pasting ever misbehaves on Linux after someone attempts
+that port, check this first rather than assuming it's "just like Windows."
 
 ---
 
@@ -296,14 +534,27 @@ to look.
 
 ## Stock Search & Market Data
 
-- `data/us_tickers_full.json` bundled, pre-sorted, prefix + substring search
-  with online enrichment merged in (`search/`).
-- Finnhub is the live-quote/chart/profile provider (`market/`); its API key
-  is read from the `FINNHUB_API_KEY` environment variable (set persistently
-  with `setx`, not just for the current session, so `stockcalc.exe` picks
-  it up when launched directly, not only via the run script).
-- Finviz/Yahoo screener polling lives in `screener/`, each source
-  independent, "Combined" derived from both.
+- `data/us_tickers_full.json` bundled, pre-sorted; `search_engine.dart` does
+  a single linear ranked pass per query (exact symbol > prefix symbol >
+  symbol substring > word-boundary name prefix > name substring — an exact
+  score ladder, not separate prefix/substring passes), merged with online
+  results from the backend's `/search` (always ranked above offline matches).
+  Deliberately simplified vs. the old C++ app's binary-search approach since
+  the dataset is only ~200 tickers.
+- Finnhub is the live-quote/chart/profile provider, proxied through the
+  backend (`backend/lib/finnhub_client.dart`) — the Flutter app never calls
+  Finnhub directly (see Architecture above). The API key is read from the
+  `FINNHUB_API_KEY` environment variable **by the backend process**, set
+  persistently with `setx` (not just for the current session), so the
+  backend exe picks it up even when `stockcalc.exe` is launched directly
+  from Explorer rather than via `run_flutter.bat`.
+- Finviz/Yahoo screener scraping happens entirely in the backend
+  (`backend/lib/finviz_client.dart`, `backend/lib/yahoo_client.dart`); the
+  app's `screener/` module only polls the backend's cache. See the two-tier
+  refresh cadence note above — this is the most common source of "why isn't
+  my refresh setting doing anything" confusion.
+- `scripts/search_symbols.py`, the old C++ app's Python search bridge, is
+  dead code — see Known Repo Cruft above.
 
 ---
 
@@ -329,6 +580,40 @@ this pattern, not the naive "just autofocus" one.
 
 ## Settings Persistence
 
-Saved via `shared_preferences` (`core/settings_service.dart`): font size,
-max search results, exchange badges toggle, stats bar toggle, window
-position/size.
+Saved via `shared_preferences` (`core/settings_service.dart`) — a
+platform-native key/value store, **not** a JSON file this app manages by
+hand (that was the old C++ app's `stockcalc_settings.json` approach, now
+gitignored dead weight — see Known Repo Cruft). Ten persisted keys: font
+size, max search results, exchange badges toggle, stats bar toggle,
+screener refresh seconds, screener panel width, and window
+width/height/x/y.
+
+---
+
+## Verified-Working Build Log (2026-10-04)
+
+For anyone wondering whether the one-click clone-and-build story actually
+holds up, here's what was run and what happened, on this machine, today:
+
+1. `run_flutter.bat` (no flags) → **failed** the first time: a previous
+   `stockcalc.exe`/`stockcalc_backend.exe` from an earlier session was still
+   running and had the backend exe file-locked, so `dart compile exe`
+   failed with a `PathAccessException`. Closed both stale processes.
+2. `run_flutter.bat` (no flags), rerun → **succeeded end-to-end**: resolved
+   the Flutter SDK, `dart pub get` + compiled the backend exe, `flutter pub
+   get` + `flutter build windows` (7.6s incremental build), detected
+   Tesseract on PATH and used it (PaddleOCR sidecar wasn't built),
+   correctly warned that `FINNHUB_API_KEY` wasn't set for the session, and
+   launched `stockcalc.exe` — confirmed a window titled "Stock Screener"
+   actually appeared.
+3. `cd app && flutter analyze` → **0 issues**.
+4. `cd app && flutter test` → **48/48 passed**.
+5. `cd backend && dart test` → **12/12 passed**.
+6. `flutter doctor` → Windows toolchain green; Android toolchain flagged
+   (no SDK on this machine) — confirms the `--android` target is
+   untested here, not broken.
+
+Nothing above required a manual path edit, a pre-existing Flutter install,
+or any step outside the two batch scripts (beyond closing the stale
+process, which is a one-time gotcha worth fixing in the script, not a
+clone-to-build gap).
