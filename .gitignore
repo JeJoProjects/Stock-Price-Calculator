@@ -38,6 +38,7 @@ __pycache__/
 *.egg-info/
 dist/
 *.spec
+!pyocr/build_sidecar.spec
 .pytest_cache/
 
 # === IDE ===

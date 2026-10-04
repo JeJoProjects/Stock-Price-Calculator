@@ -10,6 +10,10 @@ import 'core/formatting.dart';
 import 'core/panel_state.dart';
 import 'core/settings_service.dart';
 import 'market/market_client.dart';
+import 'ocr/ocr_service.dart';
+import 'ocr/ocr_sidecar_client.dart';
+import 'ocr/ocr_sidecar_launcher.dart';
+import 'ocr/tesseract_client.dart';
 import 'search/search_engine.dart';
 import 'search/ticker_data.dart';
 import 'screener/screener_hub.dart';
@@ -20,6 +24,7 @@ import 'widgets/chart_pane.dart';
 import 'widgets/combined_stats_bar.dart';
 import 'widgets/menu_bar_row.dart';
 import 'widgets/new_purchase_card.dart';
+import 'widgets/ocr_panel.dart';
 import 'widgets/panel_resize_handle.dart';
 import 'widgets/preferences_dialog.dart';
 import 'widgets/purchase_panel_card.dart';
@@ -74,7 +79,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WindowListener {
+class _HomePageState extends State<HomePage>
+    with WindowListener, SingleTickerProviderStateMixin {
   final List<PanelState> _panels = [];
   List<PanelResult> _results = [];
   CombinedResult _combined = const CombinedResult();
@@ -91,6 +97,10 @@ class _HomePageState extends State<HomePage> with WindowListener {
   String _chartExchange = '';
   Timer? _windowSaveDebounce;
 
+  late final _mainTabController = TabController(length: 2, vsync: this);
+  final _ocrSidecarLauncher = OcrSidecarLauncher();
+  OcrService _ocrService = OcrService();
+
   @override
   void initState() {
     super.initState();
@@ -103,13 +113,29 @@ class _HomePageState extends State<HomePage> with WindowListener {
       // leaving it running as an orphaned process.
       windowManager.setPreventClose(true);
       _backendLauncher.ensureRunning();
+      _resolveOcrEngine();
     }
     _loadSettings();
+  }
+
+  /// Picks whichever OCR engine is actually available, preferring the
+  /// PaddleOCR sidecar (higher accuracy) when it's built and running, and
+  /// otherwise falling back to a locally installed Tesseract - which needs
+  /// no Python/setup step at all, so the OCR tab works out of the box.
+  Future<void> _resolveOcrEngine() async {
+    await _ocrSidecarLauncher.ensureRunning();
+    if (await _ocrSidecarLauncher.status() == OcrEngineStatus.ready) {
+      if (mounted) setState(() => _ocrService = OcrService(recognizer: OcrSidecarClient()));
+      return;
+    }
+    final tesseract = await TesseractClient.detect();
+    if (mounted) setState(() => _ocrService = OcrService(recognizer: tesseract));
   }
 
   @override
   void onWindowClose() async {
     _backendLauncher.stopIfOwned();
+    _ocrSidecarLauncher.stopIfOwned();
     await windowManager.destroy();
   }
 
@@ -302,16 +328,59 @@ class _HomePageState extends State<HomePage> with WindowListener {
               },
             ),
             TopBar(tickerCount: _searchEngine?.tickerCount ?? 0),
-            if (_searchEngine != null)
-              SearchBarSection(
-                engine: _searchEngine!,
-                onSelect: _applySearchResult,
-                focusNode: _searchFocusNode,
-                maxResults: _settings.maxSearchResults,
-                showExchangeBadges: _settings.showExchangeBadges,
-              ),
+            _mainTabBar(),
             Expanded(
-              child: Padding(
+              child: TabBarView(
+                controller: _mainTabController,
+                children: [
+                  _calculatorTab(),
+                  OcrPanel(service: _ocrService),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+    );
+  }
+
+  /// Slim top-level tab strip separating the calculator UI from the OCR
+  /// tab - same accent-blue indicator language as ScreenerPanel's internal
+  /// Finviz/Yahoo/Combined tabs, just one level up.
+  Widget _mainTabBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      child: TabBar(
+        controller: _mainTabController,
+        isScrollable: true,
+        labelColor: AppColors.accentBlue,
+        unselectedLabelColor: AppColors.textMuted,
+        indicatorColor: AppColors.accentBlue,
+        labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+        tabs: const [
+          Tab(text: 'Calculator'),
+          Tab(text: 'OCR'),
+        ],
+      ),
+    );
+  }
+
+  Widget _calculatorTab() {
+    return Column(
+      children: [
+        if (_searchEngine != null)
+          SearchBarSection(
+            engine: _searchEngine!,
+            onSelect: _applySearchResult,
+            focusNode: _searchFocusNode,
+            maxResults: _settings.maxSearchResults,
+            showExchangeBadges: _settings.showExchangeBadges,
+          ),
+        Expanded(
+          child: Padding(
                 padding: const EdgeInsets.all(kPanelSpacing),
                 // Outer LayoutBuilder so the splitter below can be bounded
                 // by the row's actual available width - same rule Visual
@@ -409,15 +478,12 @@ class _HomePageState extends State<HomePage> with WindowListener {
                 ),
               ),
             ),
-            // Shown purely based on the user's preference now, not gated on
-            // having a valid panel - a toggled-on bar that silently stays
-            // hidden until you fill in numbers reads as broken.
-            if (_settings.showStatsBar)
-              CombinedStatsBar(combined: _combined, onResetAll: _resetAll),
-          ],
-        ),
-      ),
-      ),
+        // Shown purely based on the user's preference now, not gated on
+        // having a valid panel - a toggled-on bar that silently stays
+        // hidden until you fill in numbers reads as broken.
+        if (_settings.showStatsBar)
+          CombinedStatsBar(combined: _combined, onResetAll: _resetAll),
+      ],
     );
   }
 
@@ -458,6 +524,8 @@ class _HomePageState extends State<HomePage> with WindowListener {
     _screenerHub.dispose();
     _marketClient.close();
     _backendLauncher.stopIfOwned();
+    _ocrSidecarLauncher.stopIfOwned();
+    _mainTabController.dispose();
     super.dispose();
   }
 }

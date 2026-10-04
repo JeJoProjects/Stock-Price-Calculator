@@ -1,24 +1,47 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
-rem Incremental dev loop for the Flutter+Dart app: `run_flutter.bat` rebuilds
-rem only what changed and launches both the backend and the app; pass
-rem --clean to force a full rebuild first.
+rem Incremental dev loop for the Flutter+Dart app: rebuilds only what
+rem changed and launches it.
+rem
+rem Usage:
+rem   run_flutter.bat                 (same as --windows) incremental
+rem                                   build + launch on this machine
+rem   run_flutter.bat --android       incremental APK build; installs to a
+rem                                   connected device/emulator if adb sees one
+rem   run_flutter.bat --linux         prints why this can't run from Windows
+rem   run_flutter.bat --ios           prints why this can't run from Windows
+rem   run_flutter.bat --clean         force a full rebuild first (windows/android)
+rem   run_flutter.bat --rebuild-ocr   force-rebuild the PaddleOCR sidecar (windows only)
+rem Flags can be combined, e.g. "run_flutter.bat --android --clean".
 
-set DO_CLEAN=0
-if /I "%~1"=="--clean" set DO_CLEAN=1
+set "TARGET=windows"
+set "DO_CLEAN=0"
+set "DO_REBUILD_OCR=0"
+for %%A in (%*) do (
+    if /I "%%~A"=="--windows" set "TARGET=windows"
+    if /I "%%~A"=="--android" set "TARGET=android"
+    if /I "%%~A"=="--linux" set "TARGET=linux"
+    if /I "%%~A"=="--ios" set "TARGET=ios"
+    if /I "%%~A"=="--clean" set "DO_CLEAN=1"
+    if /I "%%~A"=="--rebuild-ocr" set "DO_REBUILD_OCR=1"
+)
+
+if "%TARGET%"=="linux" goto :UnsupportedHostLinux
+if "%TARGET%"=="ios" goto :UnsupportedHostIos
 
 call :ResolveFlutterSdk
 if errorlevel 1 goto :Error
 
 if %DO_CLEAN%==1 (
-    echo [clean] Cleaning app and backend build artifacts...
+    echo [clean] Cleaning app build artifacts...
     pushd app
     call "%FLUTTER_CMD%" clean
     popd
 )
 
-echo [1/3] Building backend...
+if not "%TARGET%"=="windows" goto :SkipBackendBuild
+echo [1/4] Building backend...
 pushd backend
 call "%DART_CMD%" pub get
 if errorlevel 1 (
@@ -36,8 +59,12 @@ if errorlevel 1 (
     exit /b 1
 )
 popd
+goto :AfterBackendBuild
+:SkipBackendBuild
+echo [1/4] Skipping backend ^(Windows-only - see CLAUDE.md^).
+:AfterBackendBuild
 
-echo [2/3] Building app ^(incremental^)...
+echo [2/4] Building app ^(incremental, target: %TARGET%^)...
 if not exist "app\assets\data" mkdir "app\assets\data"
 copy /Y "data\us_tickers_full.json" "app\assets\data\us_tickers_full.json" >nul
 if errorlevel 1 (
@@ -52,14 +79,17 @@ if errorlevel 1 (
     goto :Error
 )
 call "%FLUTTER_CMD%" pub get
-call "%FLUTTER_CMD%" build windows
+if "%TARGET%"=="windows" call "%FLUTTER_CMD%" build windows
+if "%TARGET%"=="android" call "%FLUTTER_CMD%" build apk --release
 if errorlevel 1 (
-    echo ERROR: flutter build windows failed.
+    echo ERROR: flutter build %TARGET% failed.
     popd
     pause
     exit /b 1
 )
 popd
+
+if not "%TARGET%"=="windows" goto :AndroidLaunch
 
 if not exist "app\build\windows\x64\runner\Release\stockcalc.exe" (
     echo ERROR: build succeeded but stockcalc.exe was not found where expected.
@@ -67,7 +97,29 @@ if not exist "app\build\windows\x64\runner\Release\stockcalc.exe" (
     exit /b 1
 )
 
-echo [3/3] Launching app...
+echo [3/4] OCR sidecar...
+if %DO_REBUILD_OCR%==1 (
+    call :BuildOcrSidecarIncremental
+) else (
+    if exist "app\build\windows\x64\runner\Release\ocr_sidecar\stockcalc_ocr.exe" (
+        echo PaddleOCR sidecar already built - skipping ^(pass --rebuild-ocr to force^).
+    ) else (
+        where tesseract >nul 2>&1
+        if errorlevel 1 (
+            if exist "C:\Program Files\Tesseract-OCR\tesseract.exe" (
+                echo Using Tesseract for OCR ^(PaddleOCR sidecar not built - pass --rebuild-ocr for higher accuracy^).
+            ) else (
+                echo No OCR engine found - the OCR tab will show as unavailable for images.
+                echo Quick fix: winget install tesseract-ocr.tesseract
+                echo Higher accuracy: run_flutter.bat --rebuild-ocr ^(needs Python^)
+            )
+        ) else (
+            echo Using Tesseract for OCR ^(PaddleOCR sidecar not built - pass --rebuild-ocr for higher accuracy^).
+        )
+    )
+)
+
+echo [4/4] Launching app...
 rem The app starts the bundled backend exe itself (see
 rem app/lib/core/backend_launcher.dart) and stops it again on close, so
 rem there's no separate server process to start/stop by hand anymore.
@@ -83,11 +135,97 @@ start "" "app\build\windows\x64\runner\Release\stockcalc.exe"
 endlocal
 exit /b 0
 
+:AndroidLaunch
+echo [3/4] APK built: app\build\app\outputs\flutter-apk\app-release.apk
+echo [4/4] Installing to a connected device/emulator ^(if any^)...
+where adb >nul 2>&1
+if errorlevel 1 (
+    echo adb not found on PATH - install it manually with:
+    echo   adb install app\build\app\outputs\flutter-apk\app-release.apk
+    endlocal
+    exit /b 0
+)
+adb install -r "app\build\app\outputs\flutter-apk\app-release.apk"
+if errorlevel 1 (
+    echo Could not install automatically ^(no device/emulator connected?^).
+    echo Connect one and run:
+    echo   adb install app\build\app\outputs\flutter-apk\app-release.apk
+)
+endlocal
+exit /b 0
+
+:UnsupportedHostLinux
+echo Linux desktop builds must be done ON a Linux machine - Flutter cannot
+echo cross-compile the GTK-based Linux desktop target from Windows.
+echo On a Linux host: flutter pub get ^&^& flutter build linux ^&^& run the
+echo built binary from app\build\linux\x64\release\bundle\.
+exit /b 0
+
+:UnsupportedHostIos
+echo iOS builds must be done ON a Mac with Xcode installed - there is no
+echo cross-compilation path from Windows.
+echo On a Mac: flutter pub get ^&^& flutter build ios, then run from Xcode
+echo or TestFlight.
+exit /b 0
+
 :Error
 echo.
 pause
 endlocal
 exit /b 1
+
+rem Rebuilds the PaddleOCR sidecar on demand (run_flutter.bat --rebuild-ocr).
+rem This is deliberately not run on every incremental launch - it's an
+rem expensive step (pip install + model fetch + PyInstaller build) that
+rem shouldn't slow down the normal dev loop. Same graceful-degradation
+rem behavior as setup_flutter.bat's :BuildOcrSidecar - failures warn and
+rem let the rest of the script continue instead of blocking launch.
+:BuildOcrSidecarIncremental
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo WARNING: Python was not found - skipping the OCR sidecar rebuild.
+    exit /b 0
+)
+
+set "OCR_VENV=%~dp0external\pyocr_venv"
+if not exist "%OCR_VENV%\Scripts\python.exe" (
+    python -m venv "%OCR_VENV%"
+    if errorlevel 1 (
+        echo WARNING: could not create the OCR sidecar virtual environment.
+        exit /b 0
+    )
+)
+
+"%OCR_VENV%\Scripts\python.exe" -m pip install --upgrade pip >nul
+"%OCR_VENV%\Scripts\python.exe" -m pip install -r pyocr\requirements.txt pyinstaller
+if errorlevel 1 (
+    echo WARNING: pip install failed - skipping the OCR sidecar rebuild.
+    exit /b 0
+)
+
+pushd pyocr
+"%OCR_VENV%\Scripts\python.exe" prefetch_models.py
+if errorlevel 1 (
+    echo WARNING: could not pre-fetch OCR models.
+    popd
+    exit /b 0
+)
+"%OCR_VENV%\Scripts\python.exe" -m PyInstaller build_sidecar.spec --noconfirm
+if errorlevel 1 (
+    echo WARNING: PyInstaller build failed.
+    popd
+    exit /b 0
+)
+popd
+
+if not exist "app\build\windows\x64\runner\Release\ocr_sidecar" mkdir "app\build\windows\x64\runner\Release\ocr_sidecar"
+xcopy /Y /E /I "pyocr\dist\stockcalc_ocr\*" "app\build\windows\x64\runner\Release\ocr_sidecar\" >nul
+if errorlevel 1 (
+    echo WARNING: could not copy the built OCR sidecar into the Release folder.
+    exit /b 0
+)
+echo OCR sidecar rebuilt successfully.
+exit /b 0
 
 :ResolveFlutterSdk
 set "FLUTTER_ROOT_IN=%FLUTTER_ROOT%"

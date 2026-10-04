@@ -48,6 +48,39 @@ dependencies:
   # reports move/resize events so we can persist them (desktop platforms only).
   window_manager: ^0.5.1
 
+  # --- OCR tab ---
+
+  # Native "Browse..." file-picker dialog (Windows desktop supported).
+  file_picker: ^8.1.6
+
+  # Drag-and-drop file support for desktop windows.
+  desktop_drop: ^0.5.0
+
+  # Reads images/files from the system clipboard - Flutter's built-in
+  # Clipboard API only exposes plain text, so pasting a Snipping Tool
+  # screenshot or a copied file needs this instead.
+  super_clipboard: ^0.8.24
+
+  # Pure-OSS (MIT) pdfium FFI bindings - covers both PDF text-layer
+  # extraction and page-to-image rasterization with a single dependency.
+  pdfrx: 1.3.4
+  # Pinned, with a local patch via dependency_overrides below (see
+  # patches/pdfrx-1.3.4/README.md) - upstream's pdf_file_cache.dart (an
+  # http-caching code path we never use, since we only call
+  # PdfDocument.openFile) has a null-promotion bug inside a closure that
+  # fails Windows builds under this Dart SDK. pdfrx 2.x fixes this but
+  # pulls in archive ^4.0.9, which conflicts with excel's archive ^3.6.1.
+
+  # Pure-Dart xlsx/xls reader for direct (non-OCR) Excel text extraction.
+  excel: ^4.0.6
+
+# See patches/pdfrx-1.3.4/README.md at the repo root - this is a local
+# fix for a compile-breaking upstream bug in an HTTP-caching code path
+# this app never exercises, not a fork for feature changes.
+dependency_overrides:
+  pdfrx:
+    path: ../patches/pdfrx-1.3.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
