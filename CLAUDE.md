@@ -164,7 +164,7 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 85 tests - verified passing 2026-10-05
+flutter test        :: 86 tests - verified passing 2026-10-05
 cd ../backend
 dart test            :: 22 tests - verified passing today
 ```
@@ -188,7 +188,7 @@ today.
 - **Flutter SDK** (auto-bootstrapped to `external/flutter` if not found)
 - **Visual Studio Build Tools**, "Desktop development with C++" workload (Windows target)
 - **Windows Developer Mode** enabled (symlink support for plugin builds)
-- Optional: **Android Studio/SDK** (`--android` target), **Tesseract OCR** and/or **Python 3.11+** (OCR tab — see below)
+- Optional: **Android Studio/SDK** (`--android` target), **Tesseract OCR** and **Python 3.9-3.12** (OCR tab — both auto-installed with winget by `setup_flutter.bat`; see below)
 
 ---
 
@@ -634,29 +634,43 @@ per-engine when it's relevant (e.g. the PDF/image warnings surfaced by
 
 ### Building the PaddleOCR sidecar
 
-Optional, and the whole point is that skipping it degrades gracefully to
-Tesseract, not to a broken app:
+`setup_flutter.bat` does everything for a fresh clone in one go: installs
+Tesseract with winget if missing (`:CheckTesseract`), bundles the German
+language data (`:PrepareTessdata`), and builds the sidecar via
+`scripts\build_ocr_sidecar.bat`, which `run_flutter.bat --rebuild-ocr` also
+calls (with `--force`). The script:
 
-```bat
-run_flutter.bat --rebuild-ocr
-```
+* finds Python 3.9-3.12 (PATH, `py` launcher, common folders incl. miniconda;
+  paddlepaddle 2.6.2 has no 3.13+ wheels) and installs Python 3.11 with
+  winget if none exists;
+* creates a venv (`external\pyocr_venv`, or `C:\stockcalc_pyvenv` when the
+  repo path is long - paddle's include tree breaks Windows' 260-char limit),
+  installs `pyocr\requirements.txt` + `pyinstaller`, runs
+  `prefetch_models.py` (German models baked into the exe, fully offline),
+  then `pyinstaller build_sidecar.spec`;
+* copies the result to `app\build\windows\x64\runner\Release\ocr_sidecar\`
+  and **deletes the duplicates** (`pyocr\dist`, `pyocr\build`, the venv;
+  `--keep-build` keeps the venv for faster rebuilds). Disk: ~2.3 GB while
+  building, ~0.65 GB kept afterwards;
+* skips itself when the installed sidecar is newer than every
+  `pyocr\*.py/*.txt/*.spec`; every failure is only a warning, so the app
+  always falls back to Tesseract-only voting.
 
-This needs Python 3.11+ (`winget install Python.Python.3.12`), creates a
-venv at `external/pyocr_venv`, installs `pyocr/requirements.txt` +
-`pyinstaller`, runs `pyocr/prefetch_models.py` (so the frozen exe ships with
-models baked in and works fully offline), then `pyinstaller
-build_sidecar.spec`, and copies the output to
-`app/build/windows/x64/runner/Release/ocr_sidecar/`. Expect several hundred
-MB to a few GB and real wall-clock time on first run — this is the single
-heaviest step in the whole build, and is why it's opt-in via a separate
-flag rather than part of the default `run_flutter.bat`/`setup_flutter.bat`
-flow. Not rebuilt today's testing pass (Tesseract was used as the active
-engine during verification, per the `run_flutter.bat` output).
+Verified 2026-10-05 on this machine (miniconda Python 3.10): the frozen exe
+reports `ready` after ~14s and, with Tesseract, reproduces the results in
+the OCR section. Two PyInstaller traps found and fixed in
+`build_sidecar.spec` - keep them: (1) a conda Python keeps libffi/openssl in
+`<prefix>\Library\bin`, which PyInstaller doesn't scan -> "DLL load failed
+while importing _ctypes", so those DLLs are bundled explicitly; (2) imageio,
+scikit-image & co. read their own package metadata at import ->
+`PackageNotFoundError`, so `copy_metadata()` is called for the dependency
+set. If a frozen build fails to start, run the exe from a console to see the
+traceback before changing anything else.
 
-PyInstaller + paddlepaddle is known to need explicit `hiddenimports`/
-`binaries`/`datas` handling (`build_sidecar.spec` already does this via
-`collect_all`) — if a frozen build fails to start, that's the first place
-to look.
+Known sidecar weakness (handled in `_plausibleFix`): PaddleOCR sometimes
+swaps the decimal comma for a dot (`1.277,52` -> `1.277.52`) and drops
+accents on some fonts (`für` -> `fur`) - it is trusted for digits, never to
+turn a well-formed German amount into a malformed one.
 
 ---
 

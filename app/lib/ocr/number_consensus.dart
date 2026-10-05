@@ -90,12 +90,17 @@ int _editDistance(String a, String b) {
   return prev.last;
 }
 
+final _germanAmountRe = RegExp(r'^\d{1,3}(?:\.\d{3})*,\d{2}$');
+
 /// Guards against "fixing" noise: a replacement must look like an OCR slip
 /// of the same number, not a different number.
 bool _plausibleFix(String a, String b) {
   final da = a.replaceAll(RegExp(r'\D'), '');
   final db = b.replaceAll(RegExp(r'\D'), '');
   if (da.isEmpty || db.isEmpty) return false;
+  // Never turn a well-formed German amount ("1.277,52") into a malformed one
+  // ("1.277.52"): neural readers sometimes swap the decimal comma for a dot.
+  if (_germanAmountRe.hasMatch(a) && !_germanAmountRe.hasMatch(b)) return false;
   // Only separators differ ("475" <-> "4,75", "1.277.52" <-> "1.277,52").
   if (da == db) return da.length >= 2;
   // Run of zeros collapsed to a single zero ("00 EUR" read for "0 EUR").

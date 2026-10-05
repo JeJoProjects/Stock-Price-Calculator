@@ -185,56 +185,11 @@ endlocal
 exit /b 1
 
 rem Rebuilds the PaddleOCR sidecar on demand (run_flutter.bat --rebuild-ocr).
-rem This is deliberately not run on every incremental launch - it's an
-rem expensive step (pip install + model fetch + PyInstaller build) that
-rem shouldn't slow down the normal dev loop. Same graceful-degradation
-rem behavior as setup_flutter.bat's :BuildOcrSidecar - failures warn and
-rem let the rest of the script continue instead of blocking launch.
+rem Not run on every incremental launch - it is an expensive step (pip install,
+rem model fetch, PyInstaller). Shared with setup_flutter.bat via
+rem scripts\build_ocr_sidecar.bat; failures warn and the script carries on.
 :BuildOcrSidecarIncremental
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo WARNING: Python was not found - skipping the OCR sidecar rebuild.
-    exit /b 0
-)
-
-set "OCR_VENV=%~dp0external\pyocr_venv"
-if not exist "%OCR_VENV%\Scripts\python.exe" (
-    python -m venv "%OCR_VENV%"
-    if errorlevel 1 (
-        echo WARNING: could not create the OCR sidecar virtual environment.
-        exit /b 0
-    )
-)
-
-"%OCR_VENV%\Scripts\python.exe" -m pip install --upgrade pip >nul
-"%OCR_VENV%\Scripts\python.exe" -m pip install -r pyocr\requirements.txt pyinstaller
-if errorlevel 1 (
-    echo WARNING: pip install failed - skipping the OCR sidecar rebuild.
-    exit /b 0
-)
-
-pushd pyocr
-"%OCR_VENV%\Scripts\python.exe" prefetch_models.py
-if errorlevel 1 (
-    echo WARNING: could not pre-fetch OCR models.
-    popd
-    exit /b 0
-)
-"%OCR_VENV%\Scripts\python.exe" -m PyInstaller build_sidecar.spec --noconfirm
-if errorlevel 1 (
-    echo WARNING: PyInstaller build failed.
-    popd
-    exit /b 0
-)
-popd
-
-if not exist "app\build\windows\x64\runner\Release\ocr_sidecar" mkdir "app\build\windows\x64\runner\Release\ocr_sidecar"
-xcopy /Y /E /I "pyocr\dist\stockcalc_ocr\*" "app\build\windows\x64\runner\Release\ocr_sidecar\" >nul
-if errorlevel 1 (
-    echo WARNING: could not copy the built OCR sidecar into the Release folder.
-    exit /b 0
-)
-echo OCR sidecar rebuilt successfully.
+call "%~dp0scripts\build_ocr_sidecar.bat" --force
 exit /b 0
 
 rem Bundles Tesseract language data next to the app exe (Release\tessdata):

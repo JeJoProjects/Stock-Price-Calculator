@@ -26,6 +26,41 @@ datas = []
 binaries = []
 hiddenimports = []
 
+# Conda-based Pythons keep libffi/openssl/etc. in <prefix>\Library\bin, which
+# PyInstaller does not scan, so the frozen exe dies at startup with
+# "DLL load failed while importing _ctypes". Bundle them explicitly. (A
+# python.org Python has none of these files there, so this is a no-op.)
+import glob
+import sys
+
+for _dll_dir in (Path(sys.base_prefix) / "Library" / "bin", Path(sys.base_prefix) / "DLLs"):
+    for _pattern in ("ffi*.dll", "libffi*.dll", "libssl*.dll", "libcrypto*.dll",
+                     "liblzma*.dll", "libbz2*.dll", "sqlite3*.dll", "zlib*.dll"):
+        for _dll in glob.glob(str(_dll_dir / _pattern)):
+            binaries.append((_dll, "."))
+
+# Several of PaddleOCR's dependencies (imageio, scikit-image, ...) call
+# importlib.metadata.version() at import time; without their *.dist-info
+# the frozen exe dies with PackageNotFoundError. Bundle the metadata of
+# everything installed from requirements.txt (missing ones are skipped).
+from PyInstaller.utils.hooks import copy_metadata
+
+for _dist in ("imageio", "imgaug", "scikit-image", "scipy", "numpy", "pillow", "tifffile",
+              "lazy_loader", "networkx", "shapely", "pyclipper", "opencv-python",
+              "opencv-contrib-python", "opencv-python-headless", "albumentations", "albucore",
+              "packaging", "tqdm", "requests", "paddlepaddle", "paddleocr", "lmdb", "rapidfuzz",
+              "python-docx", "beautifulsoup4", "lxml", "pyyaml", "fire", "cython", "pydantic",
+              "pydantic-core", "protobuf", "astor", "decorator", "opt-einsum", "httpx", "matplotlib",
+              "scikit-learn", "joblib", "threadpoolctl", "contourpy", "kiwisolver", "cycler",
+              "fonttools", "pyparsing", "python-dateutil", "six", "certifi", "idna", "urllib3",
+              "charset-normalizer", "anyio", "h11", "httpcore", "colorama", "termcolor",
+              "typing-extensions", "annotated-types", "typing-inspection", "cloudpickle",
+              "soupsieve", "imageio-ffmpeg", "attrs"):
+    try:
+        datas += copy_metadata(_dist)
+    except Exception:
+        pass
+
 for pkg in ("paddle", "paddleocr", "paddlex"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas

@@ -50,6 +50,16 @@ void main() {
     );
   });
 
+  test('a well-formed amount is never rewritten into a dot-decimal one', () {
+    final dotted = row(['Garantierte', 'Rente', '1.271.52', 'EUR']);
+    final good = row(['Garantierte', 'Rente', '1.277,52', 'EUR']);
+    // Verifier + one pass say "1.271.52" (comma->dot slip) against primary + one pass.
+    expect(
+      fix('Garantierte Rente 1.277,52 EUR\n', good, [NumberVoter(good, 1), NumberVoter(dotted, 1), NumberVoter(dotted, kVerifierWeight)]),
+      'Garantierte Rente 1.277,52 EUR\n',
+    );
+  });
+
   test('first digit may be corrected when the majority agrees', () {
     const t = 'Summe 4.277,52 EUR\n';
     final p = row(['Summe', '4.277,52', 'EUR']);

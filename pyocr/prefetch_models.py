@@ -10,5 +10,5 @@ from paddleocr import PaddleOCR
 
 if __name__ == "__main__":
     print("Downloading PaddleOCR models (this only needs to run once)...")
-    PaddleOCR(use_angle_cls=True, lang="en", show_log=True)
+    PaddleOCR(use_angle_cls=False, lang="german", show_log=True)
     print("Done.")

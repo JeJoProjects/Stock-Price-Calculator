@@ -48,7 +48,7 @@ The app's second tab extracts text locally and offline from images, PDFs (digita
 
 ### Building the PaddleOCR sidecar (optional, higher accuracy)
 
-Requires Python 3.11+ and downloads PaddleOCR/PaddlePaddle (several hundred MB to a few GB on first run). If Python isn't found, `setup_flutter.bat` skips this step and warns. Run `run_flutter.bat --rebuild-ocr` any time to build or rebuild it later.
+`setup_flutter.bat` does this automatically: it installs Tesseract and, if no Python 3.9-3.12 is found, Python 3.11 (via winget), then builds the sidecar (about 2.3 GB while building, about 0.65 GB kept - the build folders are deleted afterwards). Without it the app still works with Tesseract alone. Run `run_flutter.bat --rebuild-ocr` any time to rebuild it.
 
 ## Notes
 

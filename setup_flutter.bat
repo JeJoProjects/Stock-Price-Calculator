@@ -122,7 +122,7 @@ echo [6/7] Checking for a local OCR engine ^(Tesseract^)...
 call :CheckTesseract
 call :PrepareTessdata
 
-echo [7/7] Building the local PaddleOCR sidecar ^(optional, higher accuracy^)...
+echo [7/7] Building the PaddleOCR number-verifier sidecar ^(optional: ~2 GB to build, ~0.7 GB kept^)...
 call :BuildOcrSidecar
 
 echo.
@@ -204,89 +204,44 @@ if not exist "%TD%\deu.traineddata" (
 )
 exit /b 0
 
-rem Just informs the user whether Tesseract (the default, zero-Python OCR
-rem engine for the OCR tab - see app/lib/ocr/tesseract_client.dart) is
-rem installed. Never fails the build either way - TesseractClient.detect()
-rem already handles "not installed" gracefully at runtime.
+rem Makes sure Tesseract (the main OCR reader, see app/lib/ocr/tesseract_client.dart)
+rem is installed: found -> done; missing -> installed with winget. Never fails
+rem the build - TesseractClient.detect() handles "not installed" at runtime.
 :CheckTesseract
-where tesseract >nul 2>&1
-if errorlevel 1 (
-    if exist "C:\Program Files\Tesseract-OCR\tesseract.exe" (
-        echo Found Tesseract at C:\Program Files\Tesseract-OCR\tesseract.exe
-        exit /b 0
-    )
-    echo Tesseract was not found. Image/scanned-PDF OCR will show as
-    echo unavailable until it's installed:
-    echo   winget install UB-Mannheim.TesseractOCR
-    echo ^(Excel and digitally-generated PDFs don't need it and work either way.^)
+call :FindTesseract
+if defined TESS_FOUND (
+    echo Found Tesseract: %TESS_FOUND%
     exit /b 0
 )
-echo Found Tesseract on PATH.
+where winget >nul 2>&1
+if not errorlevel 1 (
+    echo Tesseract OCR was not found - installing it with winget...
+    winget install --id UB-Mannheim.TesseractOCR -e --silent --accept-package-agreements --accept-source-agreements
+    call :FindTesseract
+)
+if defined TESS_FOUND (
+    echo Installed Tesseract: %TESS_FOUND%
+    exit /b 0
+)
+echo WARNING: Tesseract was not found and could not be installed automatically.
+echo Image/scanned-PDF OCR stays unavailable until it is installed:
+echo   winget install UB-Mannheim.TesseractOCR
+echo ^(Excel and digitally-generated PDFs do not need it.^)
 exit /b 0
 
-rem Builds the local PaddleOCR sidecar used by the app's OCR tab. This is
-rem additive and optional: Python not being installed, pip failing, or
-rem PyInstaller failing all just print a warning and let the rest of setup
-rem succeed - the OCR tab then falls back to Tesseract (see :CheckTesseract
-rem above) or shows "engine unavailable" instead of breaking the whole
-rem build, matching the graceful degradation backend_launcher.dart already
-rem does for the Dart backend.
+:FindTesseract
+set "TESS_FOUND="
+if exist "C:\Program Files\Tesseract-OCR\tesseract.exe" set "TESS_FOUND=C:\Program Files\Tesseract-OCR\tesseract.exe"
+if not defined TESS_FOUND for /f "delims=" %%I in ('where tesseract 2^>nul') do if not defined TESS_FOUND set "TESS_FOUND=%%I"
+exit /b 0
+
+rem Builds the PaddleOCR sidecar - the second OCR reader that double-checks
+rem every number. All the logic lives in scripts\build_ocr_sidecar.bat (shared
+rem with run_flutter.bat --rebuild-ocr): it finds or installs Python, builds
+rem and installs the sidecar, and deletes the duplicate build folders. It only
+rem ever warns - without it the app still OCRs with Tesseract.
 :BuildOcrSidecar
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo WARNING: Python was not found - skipping the PaddleOCR sidecar.
-    echo Install Python 3.11+ from python.org ^(or: winget install
-    echo Python.Python.3.12^), then rerun this script. Tesseract ^(if
-    echo installed^) still covers OCR in the meantime.
-    exit /b 0
-)
-
-set "OCR_VENV=%~dp0external\pyocr_venv"
-if not exist "%OCR_VENV%\Scripts\python.exe" (
-    echo Creating a local Python virtual environment for the OCR sidecar...
-    python -m venv "%OCR_VENV%"
-    if errorlevel 1 (
-        echo WARNING: could not create the OCR sidecar virtual environment - skipping it.
-        exit /b 0
-    )
-)
-
-echo Installing OCR sidecar dependencies ^(PaddleOCR - this can take a
-echo while and several hundred MB to a few GB the first time^)...
-"%OCR_VENV%\Scripts\python.exe" -m pip install --upgrade pip >nul
-"%OCR_VENV%\Scripts\python.exe" -m pip install -r pyocr\requirements.txt pyinstaller
-if errorlevel 1 (
-    echo WARNING: pip install failed - skipping the PaddleOCR sidecar. See pyocr\README.md to retry manually.
-    exit /b 0
-)
-
-echo Pre-fetching OCR models so the shipped app works fully offline...
-pushd pyocr
-"%OCR_VENV%\Scripts\python.exe" prefetch_models.py
-if errorlevel 1 (
-    echo WARNING: could not pre-fetch OCR models - skipping the PaddleOCR sidecar.
-    popd
-    exit /b 0
-)
-
-echo Building the OCR sidecar executable with PyInstaller...
-"%OCR_VENV%\Scripts\python.exe" -m PyInstaller build_sidecar.spec --noconfirm
-if errorlevel 1 (
-    echo WARNING: PyInstaller build failed - skipping the PaddleOCR sidecar. See pyocr\README.md to retry manually.
-    popd
-    exit /b 0
-)
-popd
-
-if not exist "app\build\windows\x64\runner\Release\ocr_sidecar" mkdir "app\build\windows\x64\runner\Release\ocr_sidecar"
-xcopy /Y /E /I "pyocr\dist\stockcalc_ocr\*" "app\build\windows\x64\runner\Release\ocr_sidecar\" >nul
-if errorlevel 1 (
-    echo WARNING: could not copy the built OCR sidecar into the Release folder.
-    exit /b 0
-)
-
-echo PaddleOCR sidecar built successfully - it will be preferred over
-echo Tesseract automatically at app startup.
+call "%~dp0scripts\build_ocr_sidecar.bat"
 exit /b 0
 
 rem Windows plugin builds run cargokit's resolve_symlinks.ps1, which calls
