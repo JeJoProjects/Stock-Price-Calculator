@@ -164,7 +164,7 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 59 tests - verified passing 2026-10-05
+flutter test        :: 85 tests - verified passing 2026-10-05
 cd ../backend
 dart test            :: 22 tests - verified passing today
 ```
@@ -549,42 +549,78 @@ own per-page logic, not consulted by `OcrService`'s top-level routing. If
 you're tracing "how does a PDF get OCR'd," the real branch point is
 `PdfExtractor`'s per-page text-length check, not a switch on file kind.
 
-`ImageRecognizer` (`image_recognizer.dart`) is the abstraction point — a
-single-method abstract class (`recognize(Uint8List) → Future<String>`).
-Two implementations exist, and `main.dart`'s `_resolveOcrEngine()` picks one
-at startup (sidecar tried first, unconditionally, before falling back):
+`ImageRecognizer` (`image_recognizer.dart`) is the abstraction point
+(`recognize(Uint8List) → Future<String>`, plus `preferredConcurrency`).
+`main.dart`'s `_resolveOcrEngine()` picks the best setup at startup:
 
-1. **`OcrSidecarClient`** (PaddleOCR via the `pyocr/` sidecar) — preferred
-   when the sidecar is built and its `/health` on `127.0.0.1:8091` returns
-   ready. Higher accuracy, especially on stylized/complex layouts and
-   tables. HTTP POST to `/ocr` with a 30s timeout; a 503 response maps to
-   `engineUnavailable`, not a hard error.
-2. **`TesseractClient`** (languages: **`deu+eng`**, German first - `eng+deu`
-   measurably dropped umlauts, "für" -> "fur"; data comes from a bundled
-   `Release	essdata` folder that `setup_flutter.bat`/`run_flutter.bat`
-   populate via `:PrepareTessdata` - eng/osd copied from the Tesseract
-   install, deu downloaded from tessdata_best - and is passed with
-   `--tessdata-dir`; without that folder it falls back to plain `eng`.
-   Add other languages by dropping `<lang>.traineddata` there and listing
-   it in `TesseractClient.preferredLanguages`.) — the fallback/default. Shells out to a locally
-   installed `tesseract.exe` (`<in> <outBase> -l eng`, 30s timeout) — no
-   Python, no sidecar process, just a subprocess call per OCR request. It
-   searches a bundled path, then two hardcoded Program Files paths, then
-   `where tesseract` on PATH. Zero extra setup if Tesseract is already
-   installed (`winget install UB-Mannheim.TesseractOCR`); noticeably rougher
-   than PaddleOCR on colored/stylized layouts, fine on clean printed text.
-3. If neither is available: `OcrService(recognizer: null)` — Excel/digital
-   PDFs still work, images throw a clean `engineUnavailable` error that the
-   UI surfaces as its own state.
+1. **Tesseract + PaddleOCR sidecar (best, "hybrid")** —
+   `TesseractClient.withVerifier(OcrSidecarClient())`. Tesseract reads the
+   page; the sidecar (`BoxRecognizer.recognizeBoxes`, per-line pixel boxes)
+   is a second opinion on **numbers**.
+2. **Tesseract alone** — multi-pass with number voting (below). Zero setup
+   beyond `winget install UB-Mannheim.TesseractOCR`.
+3. **Sidecar alone** — PaddleOCR text as-is (its output glues some tokens,
+   e.g. phone numbers, so Tesseract is preferred whenever it exists).
+4. Neither: `OcrService(recognizer: null)` — Excel/digital PDFs still work,
+   images get a clean `engineUnavailable` error.
 
-**Neither engine's upstream project is vendored into this repo.** Tesseract
-and PaddleOCR are both multi-decade/large trained-model projects — their
-value is in compiled binaries and trained weights, not source you could
-usefully retype in Dart. This repo depends on their official
-binaries/packages (`tesseract.exe` via winget/installer, `paddleocr`/
-`paddlepaddle` via pip) exactly the way it depends on `pdfrx` or `excel` —
-as an external engine dependency — with 100% original Dart integration code
-around them.
+**Why numbers get special treatment (measured, not assumed).** On 13 real
+scanned German insurance pages, plain single-pass Tesseract made digit
+errors that look right but aren't — `1.277,52`→`1.271,52`/`4.277,52`,
+`1.282,17`→`14.282,17`, `37,72`→`87,72`, `4,75`→`475`, `7,77`→`nt`, and
+`0 €`→`O€`/`00€` (~0.7% of money values wrong). The pipeline in
+`TesseractClient.recognize` + `lib/ocr/number_consensus.dart` fixes this:
+
+* **Primary pass** on the original image (`deu+eng`, German first, bundled
+  `Release\tessdata`, `OMP_THREAD_LIMIT=1`), output as txt + TSV word boxes.
+* **Extra passes** at 0.9x and 1.3x (`image_variants.dart`: own typed-array
+  bilinear resize -> PGM; the `image` package's cubic resize took 13s/page,
+  this takes ~0.1s) — only when the page has numbers with ≥2 digits.
+* **Verifier** (sidecar) — weight 2.5; each extra Tesseract pass weighs 1,
+  the primary 1. A number is replaced only if a weighted majority of readings
+  *at the same page position* (same row, ±3.5% page width) agree on a close
+  variant (`_plausibleFix`: ≤2 edits, ≤1 digit-count change, or separators
+  only; tokens <3 chars never rewritten). So the verifier + one pass beat the
+  primary + one pass, but the verifier cannot beat unanimous Tesseract passes.
+* **Recovery** of what voting can't fix: a garbled cell where the verifier
+  has a bare number (`nt`→`7,77`), or a money/date line Tesseract skipped
+  entirely (grey table headers) is inserted at its row/column.
+* **Deterministic rules** (`normalizeAmounts`): `O €`/`00 €`→`0 €`, and
+  `2.460, 48 €`→`2.460,48 €`.
+* Cost: ~3x a single pass per page (still parallel across files); 13 pages
+  take ~50s hybrid, ~38s Tesseract-only, ~13s with `verifyScales: []`.
+* **Result** on those 13 pages (425 money/date values): old behaviour
+  418/421 agree with PaddleOCR (99.3%); now 425/425, and 178/178 against the
+  printer-software OCR the user compared with (where they differ, the
+  printer was wrong: it read `0,00` as `0.00` and dropped a table header).
+  A 99.9% rate cannot be *proven* from 425 values — treat it as "no known
+  errors", and keep the regression tests/tool below.
+
+Both engines' upstream projects are **not vendored**: this repo uses the
+official binaries/packages (`tesseract.exe`, `paddleocr`/`paddlepaddle` via
+pip) as external dependencies with original Dart/Python integration code.
+
+**Tooling.** `app/tool/ocr_eval.dart` OCRs a folder with the real pipeline
+(`--sidecar [--sidecar-url …] --explain --no-verify`) and prints every
+accepted fix and each position's vote — use it to compare against any other
+OCR output. **Never commit real scans or their OCR text** (private financial
+documents); tests use a synthetic amount table rendered with System.Drawing
+(`test/ocr/ocr_pipeline_test.dart`, skipped without Tesseract + German data).
+
+**Sidecar notes.** `pyocr/ocr_engine.py` now uses PaddleOCR `lang="german"`
+(the old `en` model has no umlauts), serializes inference with a lock (the
+predictor isn't thread-safe), and returns per-line boxes in `items`. A
+previously built `ocr_sidecar\stockcalc_ocr.exe` is the OLD code and returns
+no `items` — the app degrades gracefully to Tesseract-only voting; rebuild
+with `run_flutter.bat --rebuild-ocr` to get the hybrid. For development you
+can run `python pyocr\server.py` (venv with `pyocr\requirements.txt`; keep
+the venv path SHORT, e.g. `C:\pv` - Windows long paths break paddle's
+include tree) on another `PORT` and point `--sidecar-url` at it.
+
+**Languages.** `TesseractClient.preferredLanguages = ['deu','eng']`; data is
+the bundled `Release\tessdata` that `setup_flutter.bat`/`run_flutter.bat`
+fill via `:PrepareTessdata` (eng/osd copied from the install, deu from
+tessdata_best), passed with `--tessdata-dir`; without it, plain `eng`.
 
 ### A note on accuracy
 

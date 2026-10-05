@@ -10,6 +10,7 @@ import 'core/formatting.dart';
 import 'core/panel_state.dart';
 import 'core/settings_service.dart';
 import 'market/market_client.dart';
+import 'ocr/image_recognizer.dart';
 import 'ocr/ocr_service.dart';
 import 'ocr/ocr_sidecar_client.dart';
 import 'ocr/ocr_sidecar_launcher.dart';
@@ -118,18 +119,20 @@ class _HomePageState extends State<HomePage>
     _loadSettings();
   }
 
-  /// Picks whichever OCR engine is actually available, preferring the
-  /// PaddleOCR sidecar (higher accuracy) when it's built and running, and
-  /// otherwise falling back to a locally installed Tesseract - which needs
-  /// no Python/setup step at all, so the OCR tab works out of the box.
+  /// Picks the best OCR setup that is actually available:
+  ///  * Tesseract + PaddleOCR sidecar -> Tesseract reads the page and the
+  ///    sidecar cross-checks every number by position (most accurate);
+  ///  * Tesseract alone -> multi-pass Tesseract with number voting;
+  ///  * sidecar alone -> PaddleOCR text as-is.
+  /// Nothing needs Python or the sidecar - the OCR tab works with Tesseract.
   Future<void> _resolveOcrEngine() async {
     await _ocrSidecarLauncher.ensureRunning();
-    if (await _ocrSidecarLauncher.status() == OcrEngineStatus.ready) {
-      if (mounted) setState(() => _ocrService = OcrService(recognizer: OcrSidecarClient()));
-      return;
-    }
+    final sidecarReady = await _ocrSidecarLauncher.status() == OcrEngineStatus.ready;
     final tesseract = await TesseractClient.detect();
-    if (mounted) setState(() => _ocrService = OcrService(recognizer: tesseract));
+    final ImageRecognizer? engine = tesseract != null
+        ? (sidecarReady ? tesseract.withVerifier(OcrSidecarClient()) : tesseract)
+        : (sidecarReady ? OcrSidecarClient() : null);
+    if (mounted) setState(() => _ocrService = OcrService(recognizer: engine));
   }
 
   @override

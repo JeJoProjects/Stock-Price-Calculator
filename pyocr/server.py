@@ -9,7 +9,7 @@ footprint, and so the PyInstaller bundle stays as small as it can be.
 Routes:
   GET  /health  -> 200 {"status": "ready"} once the model is loaded,
                    503 {"status": "starting"} while it's still loading.
-  POST /ocr     -> body is raw image bytes; 200 {"text", "confidence", "lines"}.
+  POST /ocr     -> body is raw image bytes; 200 {"text", "confidence", "lines", "items"}.
 """
 
 from __future__ import annotations

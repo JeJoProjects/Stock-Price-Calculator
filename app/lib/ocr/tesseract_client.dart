@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'image_recognizer.dart';
+import 'image_variants.dart';
+import 'number_consensus.dart';
 import 'ocr_models.dart';
 
 /// Runs images through the Tesseract OCR engine as a subprocess - no
@@ -20,7 +22,37 @@ class TesseractClient implements ImageRecognizer {
   /// Languages to request, e.g. `eng+deu`.
   final String languages;
 
-  TesseractClient(this.exePath, {this.tessdataDir, this.languages = 'eng'});
+  /// Second opinion on numbers (e.g. the PaddleOCR sidecar). Optional.
+  final BoxRecognizer? verifier;
+
+  /// Extra page scales read to cross-check numbers. Empty disables the
+  /// multi-pass check (single fast pass, like plain Tesseract).
+  final List<double> verifyScales;
+
+  /// Diagnostics: called with every consensus result (fixes applied).
+  void Function(ConsensusResult result)? onConsensus;
+  void Function(List<({String? to, NumToken token, Map<String, double> votes})>)? onVotes;
+
+  /// Vote weight of [verifier] relative to one extra Tesseract pass.
+  static const verifierWeight = 2.5;
+
+  TesseractClient(
+    this.exePath, {
+    this.tessdataDir,
+    this.languages = 'eng',
+    this.verifier,
+    this.verifyScales = defaultVerifyScales,
+  });
+
+  /// Measured on real scans: 0.9x and 1.3x disagree with the 1.0x pass in
+  /// different places, so together they out-vote its occasional digit slip.
+  static const defaultVerifyScales = [0.9, 1.3];
+
+  TesseractClient withVerifier(BoxRecognizer? v) => TesseractClient(exePath,
+      tessdataDir: tessdataDir,
+      languages: languages,
+      verifier: v,
+      verifyScales: verifyScales);
 
   /// Languages we want when available, in priority order. German goes first:
   /// Tesseract's combined models favour the first language, and `eng+deu`
@@ -109,38 +141,114 @@ class TesseractClient implements ImageRecognizer {
   @override
   Future<String> recognize(Uint8List imageBytes) async {
     final tempDir = await Directory.systemTemp.createTemp('stockcalc_ocr_');
-    final inputFile = File('${tempDir.path}${Platform.pathSeparator}input.png');
-    final outputBase = '${tempDir.path}${Platform.pathSeparator}output';
-
     try {
-      await inputFile.writeAsBytes(imageBytes);
-
-      final result = await Process.run(exePath, [
-        inputFile.path,
-        outputBase,
-        if (tessdataDir != null) ...['--tessdata-dir', tessdataDir!],
-        '-l',
-        languages,
-      ], environment: const {'OMP_THREAD_LIMIT': '1'})
-          .timeout(const Duration(seconds: 60));
-
-      if (result.exitCode != 0) {
-        throw OcrException(
-          OcrErrorKind.extractionFailed,
-          'Tesseract failed: ${(result.stderr as String).trim()}',
-        );
+      final primary = await _pass(tempDir, 'primary', imageBytes);
+      if ((verifyScales.isEmpty && verifier == null) || !_hasSignificantNumbers(primary.words)) {
+        return normalizeAmounts(primary.text);
       }
 
-      final outputFile = File('$outputBase.txt');
-      if (!await outputFile.exists()) {
-        throw const OcrException(
-            OcrErrorKind.extractionFailed, 'Tesseract did not produce any output.');
+      final voters = <NumberVoter>[];
+      var pageWidth = 0.0;
+
+      // The sidecar call is network/CPU-bound elsewhere, so start it first.
+      final verifierFuture = verifier?.recognizeBoxes(imageBytes).then<List<OcrBox>?>((b) => b,
+          onError: (_) => null);
+
+      if (verifyScales.isNotEmpty) {
+        final variants = await makeScaledVariants(imageBytes, verifyScales);
+        if (variants != null) {
+          pageWidth = variants.width.toDouble();
+          for (final v in variants.scaled) {
+            try {
+              final pass = await _pass(tempDir, 'x${v.scale}', v.pgm);
+              voters.add(NumberVoter([for (final w in pass.words) w.scaled(1 / v.scale)], 1.0));
+            } on Object {
+              // A failed extra pass just means one fewer vote.
+            }
+          }
+        }
       }
-      return await outputFile.readAsString(encoding: utf8);
+
+      final fromVerifier = await verifierFuture;
+      if (fromVerifier != null && fromVerifier.isNotEmpty) {
+        voters.add(NumberVoter(fromVerifier, verifierWeight));
+      }
+      if (pageWidth == 0) {
+        pageWidth = primary.words.fold<double>(0, (m, w) => w.left + w.width > m ? w.left + w.width : m);
+      }
+      if ((voters.isEmpty && (fromVerifier == null || fromVerifier.isEmpty)) || pageWidth == 0) {
+        return normalizeAmounts(primary.text);
+      }
+
+      final result = applyNumberConsensus(primary.text, primary.words, voters, pageWidth,
+          recoverFrom: fromVerifier ?? const []);
+      onConsensus?.call(result);
+      onVotes?.call(decide(primary.words, voters, pageWidth));
+      return result.text;
     } on TimeoutException {
       throw const OcrException(OcrErrorKind.timeout, 'OCR took too long and was cancelled.');
     } finally {
       await tempDir.delete(recursive: true).catchError((_) => tempDir);
     }
+  }
+
+  static bool _hasSignificantNumbers(List<OcrBox> words) => numericTokens(words)
+      .any((t) => t.text.replaceAll(RegExp(r'\D'), '').length >= 2);
+
+  /// Runs one Tesseract pass, returning the plain text and word boxes.
+  Future<({String text, List<OcrBox> words})> _pass(
+      Directory dir, String name, Uint8List bytes) async {
+    final input = File('${dir.path}${Platform.pathSeparator}$name.img');
+    final outBase = '${dir.path}${Platform.pathSeparator}$name';
+    await input.writeAsBytes(bytes);
+
+    final result = await Process.run(
+      exePath,
+      [
+        input.path,
+        outBase,
+        if (tessdataDir != null) ...['--tessdata-dir', tessdataDir!],
+        '-l',
+        languages,
+        '-c',
+        'tessedit_create_txt=1',
+        '-c',
+        'tessedit_create_tsv=1',
+      ],
+      environment: const {'OMP_THREAD_LIMIT': '1'},
+    ).timeout(const Duration(seconds: 90));
+
+    if (result.exitCode != 0) {
+      throw OcrException(
+        OcrErrorKind.extractionFailed,
+        'Tesseract failed: ${(result.stderr as String).trim()}',
+      );
+    }
+    final txt = File('$outBase.txt');
+    if (!await txt.exists()) {
+      throw const OcrException(
+          OcrErrorKind.extractionFailed, 'Tesseract did not produce any output.');
+    }
+    final tsv = File('$outBase.tsv');
+    return (
+      text: await txt.readAsString(encoding: utf8),
+      words: await tsv.exists() ? parseTsv(await tsv.readAsString(encoding: utf8)) : <OcrBox>[],
+    );
+  }
+
+  /// Parses Tesseract TSV output into word boxes (level-5 rows).
+  static List<OcrBox> parseTsv(String tsv) {
+    final words = <OcrBox>[];
+    for (final line in const LineSplitter().convert(tsv)) {
+      final c = line.split('	');
+      if (c.length < 12 || c[0] != '5') continue;
+      final text = c.sublist(11).join('	').trim();
+      if (text.isEmpty) continue;
+      final l = double.tryParse(c[6]), t = double.tryParse(c[7]);
+      final w = double.tryParse(c[8]), h = double.tryParse(c[9]);
+      if (l == null || t == null || w == null || h == null) continue;
+      words.add(OcrBox(text, l, t, w, h));
+    }
+    return words;
   }
 }

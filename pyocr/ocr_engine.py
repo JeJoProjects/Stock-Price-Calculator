@@ -10,6 +10,8 @@ import threading
 
 _engine = None
 _engine_lock = threading.Lock()
+# Paddle predictors are not thread-safe; the HTTP server is multi-threaded.
+_infer_lock = threading.Lock()
 _loading = False
 
 
@@ -38,7 +40,16 @@ def _get_engine():
         try:
             from paddleocr import PaddleOCR
 
-            _engine = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+            # "german" = latin-script recognition model (umlauts, sharp s). The
+            # English model has no umlauts and mangled German text. A slightly
+            # wider unclip ratio keeps whole text lines in one detection box,
+            # which matters for numbers in table rows.
+            _engine = PaddleOCR(
+                use_angle_cls=False,
+                lang="german",
+                show_log=False,
+                det_db_unclip_ratio=1.6,
+            )
         finally:
             _loading = False
     return _engine
@@ -50,7 +61,8 @@ def recognize(image_bytes: bytes) -> dict:
 
     `text` joins recognized lines in reading order with newlines - this is
     the field the Flutter side actually displays; `lines`/`confidence` are
-    extras for future use, not required by the current client.
+    extras; `items` carries each line's pixel box so the app can cross-check
+    numbers by position (see app/lib/ocr/number_consensus.dart).
     """
     import numpy as np
     from PIL import Image
@@ -58,21 +70,29 @@ def recognize(image_bytes: bytes) -> dict:
     engine = _get_engine()
 
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    result = engine.ocr(np.array(image), cls=True)
+    with _infer_lock:
+        result = engine.ocr(np.array(image), cls=False)
 
     lines: list[str] = []
     confidences: list[float] = []
+    items: list[dict] = []
     for page in result or []:
         for detection in page or []:
             # detection shape: [box, (text, confidence)]
-            _, (text, confidence) = detection
+            box, (text, confidence) = detection
             if text:
                 lines.append(text)
                 confidences.append(float(confidence))
+                xs = [pt[0] for pt in box]
+                ys = [pt[1] for pt in box]
+                # t=text, x/x2=left/right, y=top, h=height (original pixels)
+                items.append({"t": text, "c": float(confidence), "x": min(xs),
+                              "x2": max(xs), "y": min(ys), "h": max(ys) - min(ys)})
 
     avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
     return {
         "text": "\n".join(lines),
         "confidence": avg_confidence,
         "lines": lines,
+        "items": items,
     }
