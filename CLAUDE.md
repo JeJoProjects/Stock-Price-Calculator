@@ -21,16 +21,16 @@ retired leftovers, not part of the current app. If you're orienting yourself
 in this repo, trust this file and `README.md`, not stale references to ImGui,
 CMake, or `src/*.cpp` elsewhere.
 
-**Last verified:** 2026-10-04. `setup_flutter.bat`/`run_flutter.bat` were
-actually executed end-to-end on a clean-ish Windows checkout (not just read),
-`flutter analyze` ran clean (0 issues), and the full test suite was run for
-real: 48/48 app tests pass (`cd app && flutter test`), 26/26 backend tests
-pass (`cd backend && dart test`, including new Alpha Vantage client/candle
-cache coverage added the same day — see Candle Data below). Android/Linux/iOS
-build paths were reviewed in the script source and are believed correct but
-**not** execution-tested on this machine (no Android SDK installed here;
-Linux/iOS targets structurally cannot be built from a Windows host at all — see
-below).
+**Last verified:** 2026-10-05 (earlier pass 2026-10-04). `setup_flutter.bat`
+was executed end-to-end for real, including the PaddleOCR sidecar build, the
+frozen sidecar was started and queried, `flutter analyze` ran clean (0
+issues), and the app tests pass: 86/86 (`cd app && flutter test`). Backend:
+26/26 (`cd backend && dart test`, last run 2026-10-04, no backend changes
+since). The 2026-10-05 log at the bottom lists what broke and was fixed on the
+way. Android/Linux/iOS build paths were reviewed in the script source and are
+believed correct but **not** execution-tested on this machine (no Android SDK
+installed here; Linux/iOS targets structurally cannot be built from a Windows
+host at all — see below).
 
 ---
 
@@ -166,7 +166,7 @@ flutter build windows
 cd app
 flutter test        :: 86 tests - verified passing 2026-10-05
 cd ../backend
-dart test            :: 22 tests - verified passing today
+dart test            :: 26 tests - verified passing 2026-10-04
 ```
 App side: `calc_engine_test.dart`, `formatting_test.dart`,
 `market_types_test.dart`, `search_engine_test.dart`, `widget_test.dart`, and
@@ -852,3 +852,38 @@ disk-cached value (`"cached": true`) in under 1ms with zero network calls
 — confirming both the data source and the restart-surviving cache actually
 work, not just that they compile. `cd backend && dart test` → **26/26
 passed** after the rework.
+
+## Verified-Working Build Log (2026-10-05)
+
+Second verification pass, on the same Windows machine, after the OCR work:
+
+1. `setup_flutter.bat` from a state with no working build **failed three
+   different ways before it worked**, each now fixed and documented above:
+   hidden pub cache (`Get-Item ... AppData`), a Flutter SDK under a path with
+   spaces (`'D:\C++\01_Test' is not recognized`), and a latent bug where
+   `:ResolveFlutterSdk` deleted `external\flutter`. Also fixed: unescaped
+   parentheses crashing the sidecar step, LF-only line endings breaking batch
+   labels, and transient "Pub failed to rename directory" antivirus errors
+   (rerun).
+2. `setup_flutter.bat` end-to-end → **exit 0**: Tesseract detected,
+   `:PrepareTessdata` bundled eng/osd/deu, `scripts\build_ocr_sidecar.bat`
+   rebuilt the sidecar (found miniconda Python 3.10), then deleted
+   `pyocr\dist`, `pyocr\build` and the venv (658 MB kept).
+3. Frozen sidecar test: started `ocr_sidecar\stockcalc_ocr.exe`, `/health`
+   `ready` after ~14s, German text + boxes returned. This exposed the two
+   PyInstaller traps now handled in `build_sidecar.spec` (conda DLLs,
+   package metadata).
+4. Real-document accuracy run (13 scanned German insurance pages, read from
+   OneDrive, never committed): hybrid Tesseract + PaddleOCR → 425 money/date
+   values, 178/178 agree with the printer-software OCR on its 6 pages (its two
+   disagreements are printer errors), 425/425 agree with PaddleOCR. Baseline
+   plain Tesseract was 418/421.
+5. `cd app && flutter analyze` → **0 issues**. `cd app && flutter test` →
+   **86/86 passed** (incl. real-Tesseract tests on a synthetic amount table;
+   they auto-skip without Tesseract + German data).
+6. `cd backend && dart test` was **not** re-run on this pass (no backend
+   changes); the 26/26 from 2026-10-04 still stands.
+
+Not verified: the OCR tab was exercised through its pipeline code, the
+`tool/ocr_eval.dart` CLI and the frozen sidecar - not by clicking through
+the running GUI window. Android/Linux/iOS builds remain unbuilt here.
