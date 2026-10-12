@@ -5,8 +5,8 @@ and read by `/johnny`. **CLAUDE.md is the current-truth reference** (architectur
 build, OCR pipeline); this ledger is the *history, reasoning and traps*. Don't
 duplicate long text from CLAUDE.md here — name the section instead.
 
-Last updated: 2026-10-12T21:55:23+02:00
-Last commit covered: 68a938a
+Last updated: 2026-10-12T22:03:16+02:00
+Last commit covered: 321c049 (HEAD just before the docs commit that records this update)
 
 Rules for editing: newest Timeline entry first; every claim verified against
 code/commands or marked *unverified*; no secrets; **no content of the user's
@@ -58,11 +58,56 @@ private documents or OCR output** (aggregate numbers and behavior only).
   OCR section; harmless but worth genericizing if privacy matters more.
 - `scripts/search_symbols.py`, `ToDo.txt` are dead repo cruft awaiting an
   explicit go-ahead to delete (see CLAUDE.md > Known Repo Cruft).
-- `/johnny` and `/update-johnny` were created but not yet exercised end to end.
+- `/update-johnny` has been run once (the 22:03 entry below) and worked end to
+  end; **`/johnny` has not been run yet** — run it next session and check the
+  briefing is useful and short enough.
 
 ---
 
 ## Timeline (newest first)
+
+## 2026-10-12T22:03:16+02:00 — First /update-johnny run (covers 68a938a..321c049, since 2026-10-12T21:55:23+02:00)
+
+**What changed.** Only one commit fell in the window: `321c049` (21:56:57)
+added `.claude/commands/johnny.md` (64 lines), `.claude/commands/update-johnny.md`
+(82 lines) and the seeded `.claude/johnny/KNOWLEDGE.md` (161 lines). This run
+added a "Claude Code project commands" section to `CLAUDE.md` (before "OCR Tab")
+so the current-truth doc knows the commands exist, refreshed this ledger's
+header/open items, and recorded this entry. No application code, scripts or tests
+changed in the window; working tree was clean at the start (`git status` empty).
+
+**Why / decisions.** Kept the split "CLAUDE.md = current truth, ledger =
+history/why/traps" so neither grows duplicated prose. The header stamp stores the
+sha *before* the docs commit that records an update (a commit cannot contain its
+own hash), so the next run's `<sha>..HEAD` window always includes the previous
+docs commit — expect each run to list the prior run's own commit; that is normal,
+just don't re-describe it.
+
+**Observations (verified this session).**
+- Project commands in `.claude/commands/` were picked up **without restarting**:
+  `johnny` and `update-johnny` appeared in the skill list immediately.
+- `$ARGUMENTS` was substituted with an empty string for a bare `/update-johnny`
+  (so "contains `push`" is false → commit only, no push).
+- `git add` prints "LF will be replaced by CRLF" for these files (repo
+  `autocrlf`); harmless, same as the rest of the repo.
+- `.claude/scheduled_tasks.lock` never shows in `git status` because it is
+  excluded locally in `.git/info/exclude` (not in `.gitignore`, so a fresh clone
+  has no such rule — it is a Claude Code runtime file, don't commit it).
+- The primary working directory string flips between `d:\…` and `D:\…` across
+  messages; Windows paths are case-insensitive, no action needed.
+
+**Verified vs not verified.** Verified: commit contents/sizes above (`git log
+--stat`), file existence, the lock-file exclusion, `$ARGUMENTS` behaviour.
+**Not verified:** `/johnny` itself has never been run; no build/test was run in
+this window (the 86 tests / clean analyze from 2026-10-05 still stand because no
+code changed).
+
+**User preferences & machine facts.** No new preferences. Re-confirmed: one-line
+commits; push only on request (this run does not push).
+
+**Open items / next steps.** Run `/johnny` once and tune it; consider replacing
+the real-looking example amounts in CLAUDE.md's OCR section with invented ones;
+GUI click-through of the hybrid OCR tab is still outstanding.
 
 ## 2026-10-12T21:55:23+02:00 — Created /johnny and /update-johnny (covers 68a938a..68a938a, since first ledger)
 

@@ -497,6 +497,26 @@ setup_flutter.bat / run_flutter.bat   Build/run entrypoints (see above)
 
 ---
 
+## Claude Code project commands (`/johnny`, `/update-johnny`)
+
+Project slash commands in `.claude/commands/` (checked in, so a fresh clone has
+them), sharing the knowledge ledger `.claude/johnny/KNOWLEDGE.md`:
+
+- **`/johnny [verify | <topic>]`** — read-only refresh: reads this file, the
+  ledger, the README and the user's memory, diffs git against the ledger's
+  `Last updated` / `Last commit covered` header, spot-checks that documented
+  files still exist, then briefs. `verify` also runs `flutter analyze` + tests;
+  a topic (e.g. `ocr`) makes it read that area's code.
+- **`/update-johnny [push] [notes]`** — records everything since the last stamp
+  (git history, uncommitted work, the session's decisions/root causes/numbers/
+  unverified items) as a new top entry in the ledger, reconciles this file and
+  memory, and makes a one-line commit; pushes only with the word `push`.
+
+Division of labour: **this file = current truth**; **the ledger = history, the
+"why", traps and open items**. Never put private scans/OCR text or secrets in
+either. `.claude/scheduled_tasks.lock` is excluded locally via
+`.git/info/exclude`, not tracked.
+
 ## OCR Tab
 
 Second top-level tab, **batch-oriented** (if every file shows "No OCR engine
