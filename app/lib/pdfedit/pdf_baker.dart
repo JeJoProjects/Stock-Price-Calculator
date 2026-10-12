@@ -268,10 +268,10 @@ class TextLineInfo {
   List<int> get objectIndices => [for (final r in runs) r.objectIndex];
 }
 
-class ImageInfo {
+class PageImageInfo {
   final int objectIndex;
   final Box box;
-  const ImageInfo(this.objectIndex, this.box);
+  const PageImageInfo(this.objectIndex, this.box);
 }
 
 class PageInfo {
@@ -279,7 +279,7 @@ class PageInfo {
   final double width, height;
   final int rotation;
   final List<TextLineInfo> lines;
-  final List<ImageInfo> images;
+  final List<PageImageInfo> images;
   const PageInfo(this.index, this.width, this.height, this.rotation, this.lines, this.images);
 }
 
@@ -304,7 +304,7 @@ List<PageInfo> analyzePages(Uint8List bytes, List<int> indices) {
           runs.add(TextRunInfo(r.objectIndex, r.text, _displayBox(pb, r.left, r.bottom, r.right, r.top), o.$1, o.$2,
               r.fontSize, r.fontName, r.bold, r.italic, r.colorArgb));
         }
-        final images = [for (final r in page.imageRuns()) ImageInfo(r.objectIndex, _displayBox(pb, r.left, r.bottom, r.right, r.top))];
+        final images = [for (final r in page.imageRuns()) PageImageInfo(r.objectIndex, _displayBox(pb, r.left, r.bottom, r.right, r.top))];
         out.add(PageInfo(i, pb.displayWidth, pb.displayHeight, pb.rotation, _groupLines(runs), images));
       } finally {
         page.close();

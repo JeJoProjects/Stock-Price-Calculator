@@ -25,7 +25,9 @@ import 'widgets/chart_pane.dart';
 import 'widgets/combined_stats_bar.dart';
 import 'widgets/menu_bar_row.dart';
 import 'widgets/new_purchase_card.dart';
+import 'pdfedit/startup.dart';
 import 'widgets/ocr_panel.dart';
+import 'widgets/pdf_editor_panel.dart';
 import 'widgets/panel_resize_handle.dart';
 import 'widgets/preferences_dialog.dart';
 import 'widgets/purchase_panel_card.dart';
@@ -36,7 +38,8 @@ import 'widgets/top_bar.dart';
 bool get _isDesktop =>
     !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
-void main() async {
+void main(List<String> args) async {
+  collectStartupPdfPaths(args);
   WidgetsFlutterBinding.ensureInitialized();
 
   if (_isDesktop) {
@@ -98,7 +101,7 @@ class _HomePageState extends State<HomePage>
   String _chartExchange = '';
   Timer? _windowSaveDebounce;
 
-  late final _mainTabController = TabController(length: 2, vsync: this);
+  late final _mainTabController = TabController(length: 3, vsync: this);
   final _ocrSidecarLauncher = OcrSidecarLauncher();
   OcrService _ocrService = OcrService();
 
@@ -338,6 +341,7 @@ class _HomePageState extends State<HomePage>
                 children: [
                   _calculatorTab(),
                   OcrPanel(service: _ocrService),
+                  const PdfEditorPanel(),
                 ],
               ),
             ),
@@ -366,6 +370,7 @@ class _HomePageState extends State<HomePage>
         tabs: const [
           Tab(text: 'Calculator'),
           Tab(text: 'OCR'),
+          Tab(text: 'PDF Editor'),
         ],
       ),
     );

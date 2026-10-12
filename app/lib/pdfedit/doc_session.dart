@@ -98,6 +98,9 @@ class PdfDocSession extends ChangeNotifier {
   /// Increments whenever the working file changes (page images must reload).
   int get revision => _revision;
 
+  /// Identifies this document + working file version for render caches.
+  String get renderKey => '${identityHashCode(this)}:$_revision:${_snap.version}';
+
   bool get canUndo => _pos > 0;
   bool get canRedo => _pos < _history.length - 1;
   bool get dirty => !identical(_snap, _savedSnap);
@@ -146,6 +149,12 @@ class PdfDocSession extends ChangeNotifier {
   void addOp(EditOp op) => _push([..._snap.ops, op]);
 
   void addOps(List<EditOp> ops) => _push([..._snap.ops, ...ops]);
+
+  /// Replaces several ops (matched by id) as ONE undo step.
+  void addOpsReplacing(List<EditOp> replacements) {
+    final byId = {for (final o in replacements) o.id: o};
+    _push([for (final o in _snap.ops) byId[o.id] ?? o]);
+  }
 
   /// Replaces the op with the same id. With [record] false the change is shown
   /// but not added to history (use for drags, then call [commit]).

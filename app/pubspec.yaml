@@ -107,6 +107,29 @@ flutter:
 
   assets:
     - assets/data/us_tickers_full.json
+    - assets/fonts/signature/
+
+  # Handwriting fonts for typed signatures (SIL Open Font License 1.1: free to
+  # bundle, modify and sell; licence texts sit beside the fonts).
+  fonts:
+    - family: SigGreatVibes
+      fonts:
+        - asset: assets/fonts/signature/GreatVibes-Regular.ttf
+    - family: SigAllura
+      fonts:
+        - asset: assets/fonts/signature/Allura-Regular.ttf
+    - family: SigSacramento
+      fonts:
+        - asset: assets/fonts/signature/Sacramento-Regular.ttf
+    - family: SigKristi
+      fonts:
+        - asset: assets/fonts/signature/Kristi-Regular.ttf
+    - family: SigMrDafoe
+      fonts:
+        - asset: assets/fonts/signature/MrDafoe-Regular.ttf
+    - family: SigPacifico
+      fonts:
+        - asset: assets/fonts/signature/Pacifico-Regular.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
