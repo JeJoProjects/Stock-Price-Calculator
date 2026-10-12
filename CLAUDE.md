@@ -164,7 +164,7 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 86 tests - verified passing 2026-10-05
+flutter test        :: 112 tests - verified passing 2026-10-12
 cd ../backend
 dart test            :: 26 tests - verified passing 2026-10-04
 ```
@@ -198,7 +198,7 @@ today.
 
 ```
 StockCalcApp (MaterialApp)
-  └── HomePage — top-level TabController(length: 2)
+  └── HomePage — top-level TabController(length: 3)
         ├── Tab "Calculator"
         │     ├── MenuBarRow (File/Edit/View/Help + shortcuts)
         │     ├── TopBar
@@ -209,8 +209,10 @@ StockCalcApp (MaterialApp)
         │     ├── PurchasePanelCard × N + NewPurchaseCard
         │     ├── ChartPane (Finnhub quotes/candles, via the backend)
         │     └── CombinedStatsBar
-        └── Tab "OCR"
-              └── OcrPanel — drop/browse/paste → extracted, editable text
+        ├── Tab "OCR"
+        │     └── OcrPanel — drop/browse/paste → extracted, editable text
+        └── Tab "PDF Editor"
+              └── PdfEditorPanel — open PDFs/folders, edit, annotate, sign, save
   ├── BackendLauncher — self-launches backend/bin/server.dart's compiled
   │     exe (stockcalc_backend.exe) on localhost:8090, kills it on close.
   │     Windows-only (no-ops on other platforms via a Platform.isWindows
@@ -496,6 +498,67 @@ setup_flutter.bat / run_flutter.bat   Build/run entrypoints (see above)
   loop, there's no reason to skip them.
 
 ---
+
+## PDF Editor Tab
+
+Third top-level tab: open many PDFs / a whole folder (drag-drop, browse,
+`stockcalc.exe file.pdf`, or `STOCKCALC_PDF_OPEN=a.pdf;folder`), edit existing
+text/digits/currency symbols, add text, whiteout, shapes, annotations,
+images/stamps/signatures, page tools, undo/redo, Apply changes, Save/Save as,
+drafts. Toolbar names/order follow the product owner's brief (Text▾ Links Forms▾
+Images▾ Sign▾ Whiteout Annotate▾ Shapes▾ Undo Redo); the visual design is
+original (no assets copied from any reference product). Requirements, research
+and status table: `docs/pdf-editor/PLAN.md` (keep its status table current).
+
+**Architecture (decisions that are easy to get wrong):**
+* **Overlay edit list + bake.** Live edits are immutable `EditOp`s
+  (`lib/pdfedit/edit_model.dart`, display-space points, top-left origin) drawn by
+  Flutter over a PDFium-rendered page; they become real PDF content only when
+  saving (`pdf_baker.dart: bakeOps`). Page-level actions (`StructAction`: delete,
+  rotate, insert blank/from file, move) rewrite the working file; a structural
+  action first bakes pending overlays so indices stay valid.
+* **Own PDFium FFI** (`pdfium_edit.dart`) over the same `pdfium.dll` pdfrx ships:
+  pdfrx's bindings lack `FPDF_SaveAsCopy`/`FPDF_FILEWRITE`. ALL editor PDFium work
+  (bake, analyse, page actions, rendering) runs through ONE worker isolate
+  (`pdfium_worker.dart`) — PDFium is not thread-safe. The OCR tab's PDF
+  extraction uses pdfrx's own worker: don't run a PDF OCR batch and heavy editing
+  at the same moment.
+* **History** (`doc_session.dart`): snapshots `(workingVersion, ops)`; undo/redo
+  move a pointer and swap the working file. Drags use `updateOp(record:false)` then
+  `commit(before)` = one undo step. Drafts (`.pdfedit` JSON) store the source path +
+  every page action + live ops, not the PDF.
+* **Existing-text editing:** hit-test PDFium text objects grouped into lines
+  (`TextLineInfo`, baseline tolerance 0.3·size, word gap < 0.8·size); an edit removes
+  the original object(s) at bake time (truly gone from the file/text layer) and inserts
+  one new text object; the preview paints a paper-white patch until baked. Fonts: PDF
+  standard-14 for Latin text, otherwise an installed Windows TrueType is embedded
+  whole (`fonts.dart`); original embedded subset fonts cannot be reused, so the
+  closest installed family is used.
+* **Coordinates:** `PageBox` converts display <-> user space for /Rotate 0/90/180/270
+  (round-trip tested). Text/images are counter-rotated to appear upright.
+* Dart naming trap: the page-image record is `PageImageInfo` (Flutter owns `ImageInfo`).
+* `package:image` `decodeImage` THROWS (not null) on some garbage input — always wrap.
+
+**Files:** `lib/pdfedit/` (pure Dart/FFI: `pdfium_edit`, `pdfium_worker`,
+`edit_model`, `fonts`, `pdf_baker`, `doc_session`, `workspace`, `asset_store`,
+`signature_tools`, `startup`) and `lib/widgets/pdf_editor_panel.dart` +
+`lib/widgets/pdf_editor/` (`editor_controller`, `editable_page` = all pointer
+interaction + inline text editor, `overlay_painter`, `pdf_canvas`, `editor_toolbar`,
+`options_bar`, `editor_rail`, `dialogs`, `image_renderers`, `page_renderer`).
+Signatures/custom stamps persist as PNGs in `%APPDATA%\stockcalc\{signatures,stamps}`;
+6 handwriting fonts (SIL OFL, licences beside them) in `assets/fonts/signature/`.
+
+**Tests / tooling:** `test/pdfedit/*` (synthetic PDFs only; real-PDFium tests auto-skip
+without `build/windows/x64/runner/Release/pdfium.dll`). `dart run tool/make_sample_pdf.dart
+<out.pdf> [pages]` writes an invented statement-like PDF for manual QA (set `PDFIUM_DLL`
+to the dll). **Never test with the user's real documents.**
+
+**Known gaps (shown as "soon" in the Forms menu or noted in the plan):** interactive
+AcroForm field creation / detect fields / form edit mode / tab order (needs object
+creation beyond PDFium's API), page drag-reorder, autosave of drafts, text-selection
+markup on scanned (image-only) pages falls back to the dragged rectangle. The GUI was
+verified by launching the real app and screenshots (tab, document list, thumbnails,
+toolbar, options bar, inline editing, Apply changes button) but not every dialog.
 
 ## Claude Code project commands (`/johnny`, `/update-johnny`)
 
