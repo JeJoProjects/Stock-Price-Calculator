@@ -5,8 +5,8 @@ and read by `/johnny`. **CLAUDE.md is the current-truth reference** (architectur
 build, OCR pipeline); this ledger is the *history, reasoning and traps*. Don't
 duplicate long text from CLAUDE.md here — name the section instead.
 
-Last updated: 2026-10-12T22:03:16+02:00
-Last commit covered: 321c049 (HEAD just before the docs commit that records this update)
+Last updated: 2026-10-12T22:52:22+02:00
+Last commit covered: 7ad536d (HEAD just before the docs commit that records this update)
 
 Rules for editing: newest Timeline entry first; every claim verified against
 code/commands or marked *unverified*; no secrets; **no content of the user's
@@ -29,6 +29,8 @@ private documents or OCR output** (aggregate numbers and behavior only).
 - Digits/amounts in OCR must be right (target 99.9%); speed matters too.
 - Writes casually (typos); infer intent, don't ask about spelling.
 - Wants `setup_flutter.bat` to be the one-stop bootstrap on a fresh clone.
+- For big features: list requirements, research each, give steps, then implement; wants
+  polished/intuitive UX and commercially safe licensing (sellable or open source).
 - Wants Claude-side tooling in the repo: `/johnny` (refresh) and
   `/update-johnny` (record) project commands in `.claude/commands/`.
 
@@ -58,13 +60,87 @@ private documents or OCR output** (aggregate numbers and behavior only).
   OCR section; harmless but worth genericizing if privacy matters more.
 - `scripts/search_symbols.py`, `ToDo.txt` are dead repo cruft awaiting an
   explicit go-ahead to delete (see CLAUDE.md > Known Repo Cruft).
-- `/update-johnny` has been run once (the 22:03 entry below) and worked end to
-  end; **`/johnny` has not been run yet** — run it next session and check the
-  briefing is useful and short enough.
+- `/update-johnny` has now been run twice and works; **`/johnny` has not been run yet** —
+  run it next session and check the briefing is useful and short enough.
+- PDF Editor: see the 22:52 entry (forms, reorder, autosave, GUI click-through pending;
+  5 commits unpushed).
 
 ---
 
 ## Timeline (newest first)
+
+## 2026-10-12T22:52:22+02:00 — PDF Editor tab built (covers 321c049..7ad536d, since 2026-10-12T22:03:16+02:00)
+
+**What changed.** A whole new feature, 5 feature commits (all local, not pushed):
+`6abea74` engine (`app/lib/pdfedit/pdfium_edit.dart`, `edit_model.dart`, `fonts.dart`,
+`pdf_baker.dart`), `1de0be9` session/workspace (`doc_session.dart`, `workspace.dart`),
+`4002814` single PDFium worker (`pdfium_worker.dart`), `ba136f0` the UI + tab wiring
+(`lib/widgets/pdf_editor_panel.dart`, `lib/widgets/pdf_editor/*`, `lib/main.dart`
+TabController 2→3, `lib/pdfedit/startup.dart`, `asset_store.dart`, `signature_tools.dart`,
+6 OFL fonts in `assets/fonts/signature/`, `tool/make_sample_pdf.dart`, `pubspec.yaml`
++ `ffi` dependency and fonts), `7ad536d` docs (`CLAUDE.md` "PDF Editor Tab" section,
+`docs/pdf-editor/PLAN.md`). Also the previous docs commit `89bbb86` (last ledger run).
+Feature list and architecture are in CLAUDE.md > PDF Editor Tab — not repeated here.
+
+**Why / decisions.**
+* Brief from the user: a Sejda-like PDF editor tab (exact toolbar names from 8
+  screenshots), many files/folders, edit text/symbols, signatures remembered, Apply
+  changes, undo/redo, drafts, "million-dollar" intuitive UX, sellable/open-source, and
+  *list requirements → per-requirement research → plan → then implement*.
+* Engine choice: the bundled PDFium (via pdfrx's `pdfium.dll`) already exposes text/
+  path/image/page-object APIs; only `FPDF_SaveAsCopy` was unbound → own ~50-function FFI
+  layer. Rejected: Syncfusion (commercial licence), MuPDF (AGPL), Stirling-PDF (open-core,
+  server), re-rasterizing pages (loses text). Verified by a spike before building.
+* Overlay-ops + bake-on-save (cheap undo/drafts/fast UI) instead of editing the PDF live.
+* Snapshots-with-pointer history; structural actions bake overlays first.
+* One serialized PDFium worker isolate (thread-safety) instead of `Isolate.run` per job;
+  rendering moved to my FFI (`FPDF_RenderPageBitmap`) so the editor never touches pdfrx.
+* Reference product's *names/menus* imitated, visuals/assets original (legal).
+* Interactive AcroForm fields not attempted: PDFium cannot create them; menu shows "soon".
+
+**Problems → root cause → fix.**
+* Python-in-bash edits corrupted files again (`\n`/`\b` became control chars; heredocs with
+  quotes failed; an IDE re-saved stale test text). Fix: use the Write/Edit tools; check
+  `\x08` bytes. (A hidden backspace had silently broken a date regex.)
+* Line grouping merged/split columns wrongly in my own tests → word-gap threshold 0.8·size.
+* `ImageInfo` name clash with Flutter → `PageImageInfo`.
+* `img.decodeImage` throws on garbage (twice: `makeScaledVariants` earlier, `imageAspect`
+  now) → always try/catch.
+* PDFium isolates: first design used many short isolates → replaced by one worker.
+* Dev sidecar port 8091 etc. not involved here.
+
+**Measurements & results.** Tests: 112 app tests pass (was 86); 5 new test files in
+`test/pdfedit/` (FFI, baker, session, worker, UI). `flutter analyze` clean. Windows build
+~60–65 s. Rotation round-trip verified for 0/90/180/270. Spike: PDFium create+save 1,023-byte PDF.
+Real-document use never happened (synthetic PDFs only).
+
+**Verified vs not verified.** Verified: all unit/widget tests; the built app launches,
+tab renders (start view, then editor with document list, thumbnails, toolbar, options bar,
+page bar, rendered page, hover highlight, inline text edit, "Unsaved changes" + Apply
+changes button) via screenshots. **Not verified in the GUI:** signature/stamp/link/
+find&replace dialogs, image placing, Insert page, Save/Apply file pickers, shapes/
+markup drawing by hand, keyboard shortcuts, large PDFs, password PDFs, non-white page
+backgrounds under replaced text (preview patch is always white), OCR-tab regression after
+the main.dart change (full suite passed). Nothing pushed.
+
+**Traps / gotchas.**
+* Don't run PDF OCR batch and heavy editing together (two PDFium workers).
+* Close the running `stockcalc.exe` before `flutter build windows` (locks the exe).
+* The window screenshot helper (`C:\pdftest\helpers.ps1`, scratch, not in repo) clicks the
+  real desktop — it can interfere with the user's own mouse use.
+* Replacing text rewrites the whole line in one font; embedded TTFs are embedded whole
+  (file size grows); standard-14 fonts used for Latin-only text.
+* `tool/make_sample_pdf.dart` needs `PDFIUM_DLL` env pointing at the built `pdfium.dll`.
+
+**User preferences & machine facts.** Wants research-first, requirement-listed, planned
+delivery for big features; high polish/intuitive UX; commercial-grade licensing. The user
+was interacting with the freshly launched app on their real desktop while I tested.
+Scratch folder `C:\pdftest` (synthetic samples + screenshots) is outside the repo.
+
+**Open items / next steps.** Push the 5 commits when asked. Form fields (create/detect/
+edit/tab order), page drag-reorder, draft autosave, background-colour sampling for the
+text-replace patch, GUI click-through of every dialog, performance on 100+ page PDFs,
+decide whether `stockcalc.exe` should register as a PDF "Open with" handler.
 
 ## 2026-10-12T22:03:16+02:00 — First /update-johnny run (covers 68a938a..321c049, since 2026-10-12T21:55:23+02:00)
 
