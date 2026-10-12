@@ -11,11 +11,11 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'edit_model.dart';
 import 'pdf_baker.dart';
 import 'pdfium_edit.dart';
+import 'pdfium_worker.dart';
 
 class _Snap {
   const _Snap(this.version, this.ops);
@@ -77,13 +77,13 @@ class PdfDocSession extends ChangeNotifier {
   /// Opens [path]. Throws [PdfiumException] for unreadable/encrypted files.
   static Future<PdfDocSession> open(String path) async {
     final bytes = await File(path).readAsBytes();
-    final sizes = await Isolate.run(() => readPageSizes(bytes));
+    final sizes = await PdfiumWorker.instance.run(() => readPageSizes(bytes));
     return PdfDocSession._(path.split(RegExp(r'[\\/]')).last, path, bytes, sizes);
   }
 
   static Future<PdfDocSession> blank({String title = 'Untitled.pdf', int pages = 1}) async {
-    final bytes = await Isolate.run(() => createBlankPdf(pages: pages));
-    final sizes = await Isolate.run(() => readPageSizes(bytes));
+    final bytes = await PdfiumWorker.instance.run(() => createBlankPdf(pages: pages));
+    final sizes = await PdfiumWorker.instance.run(() => readPageSizes(bytes));
     return PdfDocSession._(title, null, bytes, sizes);
   }
 
@@ -189,7 +189,8 @@ class PdfDocSession extends ChangeNotifier {
 
   Future<void> _afterMove(int beforeVersion) async {
     if (_snap.version != beforeVersion) {
-      _pageSizes = await Isolate.run(() => readPageSizes(workingBytes));
+      final bytes = workingBytes;
+      _pageSizes = await PdfiumWorker.instance.run(() => readPageSizes(bytes));
       _revision++;
     }
     notifyListeners();
@@ -201,8 +202,8 @@ class PdfDocSession extends ChangeNotifier {
   Future<void> applyStructure(StructAction action) async {
     final ops = _snap.ops;
     final current = workingBytes;
-    final result = await Isolate.run(() => applyAction(bakeOps(current, ops), action));
-    final sizes = await Isolate.run(() => readPageSizes(result));
+    final result = await PdfiumWorker.instance.run(() => applyAction(bakeOps(current, ops), action));
+    final sizes = await PdfiumWorker.instance.run(() => readPageSizes(result));
     final v = _snap.version;
     // Drop redo history, then extend the version chain.
     _history = _history.sublist(0, _pos + 1);

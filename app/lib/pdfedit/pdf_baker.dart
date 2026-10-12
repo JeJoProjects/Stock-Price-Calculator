@@ -4,13 +4,13 @@
 library;
 
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'edit_model.dart';
 import 'fonts.dart';
 import 'pdfium_edit.dart';
+import 'pdfium_worker.dart';
 
 // ---------------------------------------------------------------------------
 // Baking overlay edits
@@ -42,7 +42,7 @@ Uint8List bakeOps(Uint8List source, List<EditOp> ops) {
 }
 
 Future<Uint8List> bakeOpsAsync(Uint8List source, List<EditOp> ops) =>
-    ops.isEmpty ? Future.value(source) : Isolate.run(() => bakeOps(source, ops));
+    ops.isEmpty ? Future.value(source) : PdfiumWorker.instance.run(() => bakeOps(source, ops));
 
 void _bakePage(PdfiumDoc doc, PdfiumPage page, List<EditOp> ops) {
   final box = page.box;
@@ -217,7 +217,8 @@ Uint8List applyAction(Uint8List bytes, StructAction action) {
   }
 }
 
-Future<Uint8List> applyActionAsync(Uint8List bytes, StructAction action) => Isolate.run(() => applyAction(bytes, action));
+Future<Uint8List> applyActionAsync(Uint8List bytes, StructAction action) =>
+    PdfiumWorker.instance.run(() => applyAction(bytes, action));
 
 /// Creates a new blank PDF.
 Uint8List createBlankPdf({int pages = 1, double width = 595.28, double height = 841.89}) {
@@ -315,7 +316,8 @@ List<PageInfo> analyzePages(Uint8List bytes, List<int> indices) {
   }
 }
 
-Future<List<PageInfo>> analyzePagesAsync(Uint8List bytes, List<int> indices) => Isolate.run(() => analyzePages(bytes, indices));
+Future<List<PageInfo>> analyzePagesAsync(Uint8List bytes, List<int> indices) =>
+    PdfiumWorker.instance.run(() => analyzePages(bytes, indices));
 
 /// Groups runs sharing a baseline into lines, splitting at wide gaps (columns).
 List<TextLineInfo> _groupLines(List<TextRunInfo> runs) {

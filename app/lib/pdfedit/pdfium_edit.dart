@@ -164,7 +164,14 @@ class _Api {
         annotSetRect = l.lookupFunction<Int32 Function(Handle, Pointer<_FsRectF>),
             int Function(Handle, Pointer<_FsRectF>)>('FPDFAnnot_SetRect'),
         annotSetUri = l.lookupFunction<Int32 Function(Handle, Pointer<Utf8>),
-            int Function(Handle, Pointer<Utf8>)>('FPDFAnnot_SetURI');
+            int Function(Handle, Pointer<Utf8>)>('FPDFAnnot_SetURI'),
+        bitmapCreate = l.lookupFunction<Handle Function(Int32, Int32, Int32), Handle Function(int, int, int)>('FPDFBitmap_Create'),
+        bitmapFill = l.lookupFunction<Int32 Function(Handle, Int32, Int32, Int32, Int32, Uint32),
+            int Function(Handle, int, int, int, int, int)>('FPDFBitmap_FillRect'),
+        bitmapBuffer = l.lookupFunction<Pointer<Uint8> Function(Handle), Pointer<Uint8> Function(Handle)>('FPDFBitmap_GetBuffer'),
+        bitmapStride = l.lookupFunction<Int32 Function(Handle), int Function(Handle)>('FPDFBitmap_GetStride'),
+        renderBitmap = l.lookupFunction<Void Function(Handle, Handle, Int32, Int32, Int32, Int32, Int32, Int32),
+            void Function(Handle, Handle, int, int, int, int, int, int)>('FPDF_RenderPageBitmap');
 
   final Handle Function(Pointer<Uint8>, int, Pointer<Utf8>) loadMem;
   final Handle Function() createDoc;
@@ -220,6 +227,11 @@ class _Api {
   final void Function(Handle) closeAnnot;
   final int Function(Handle, Pointer<_FsRectF>) annotSetRect;
   final int Function(Handle, Pointer<Utf8>) annotSetUri;
+  final Handle Function(int, int, int) bitmapCreate;
+  final int Function(Handle, int, int, int, int, int) bitmapFill;
+  final Pointer<Uint8> Function(Handle) bitmapBuffer;
+  final int Function(Handle) bitmapStride;
+  final void Function(Handle, Handle, int, int, int, int, int, int) renderBitmap;
 }
 
 final _apis = <DynamicLibrary, _Api>{};
@@ -666,6 +678,33 @@ class PdfiumPage {
       malloc.free(u);
       calloc.free(rect);
       a.closeAnnot(annot);
+    }
+  }
+
+  /// Renders the page to a [w] x [h] BGRA bitmap (tightly packed rows).
+  /// [annotations] draws existing annotations/links/form widgets.
+  Uint8List renderBgra(int w, int h, {bool annotations = true, int background = 0xFFFFFFFF}) {
+    final a = _api();
+    final bmp = a.bitmapCreate(w, h, 0);
+    if (bmp == nullptr) throw const PdfiumException('Not enough memory to render the page.');
+    try {
+      a.bitmapFill(bmp, 0, 0, w, h, background);
+      // flags: 0x01 annotations, 0x02 LCD text off (grayscale AA is cleaner on scaled views)
+      a.renderBitmap(bmp, handle, 0, 0, w, h, 0, annotations ? 0x01 : 0);
+      final buf = a.bitmapBuffer(bmp);
+      final stride = a.bitmapStride(bmp);
+      final out = Uint8List(w * h * 4);
+      final src = buf.asTypedList(stride * h);
+      if (stride == w * 4) {
+        out.setAll(0, src.sublist(0, w * h * 4));
+      } else {
+        for (var y = 0; y < h; y++) {
+          out.setRange(y * w * 4, (y + 1) * w * 4, src, y * stride);
+        }
+      }
+      return out;
+    } finally {
+      a.bitmapDestroy(bmp);
     }
   }
 
