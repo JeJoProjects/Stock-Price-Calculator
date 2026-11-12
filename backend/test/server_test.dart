@@ -5,17 +5,22 @@ import 'package:http/http.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final port = '8091';
-  final host = 'http://127.0.0.1:$port';
+  // Port 0 = any free port (8091 is the OCR sidecar's, often in use); the
+  // server prints the one it got.
+  late String port;
+  late String host;
   late Process p;
 
   setUp(() async {
     p = await Process.start(
-      'dart',
+      Platform.resolvedExecutable, // the running dart.exe (a bare 'dart' may be a .bat Process.start can't run)
       ['run', 'bin/server.dart'],
-      environment: {'PORT': port},
+      environment: {'PORT': '0'},
     );
-    await p.stdout.first;
+    p.stderr.drain<void>();
+    final line = await p.stdout.transform(utf8.decoder).first;
+    port = RegExp(r'port (\d+)').firstMatch(line)!.group(1)!;
+    host = 'http://127.0.0.1:$port';
   });
 
   tearDown(() => p.kill());
@@ -45,6 +50,22 @@ void main() {
     expect(response.statusCode, 200);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     expect(body['rows'], isEmpty);
+  });
+
+  test('Scanner snapshot responds immediately', () async {
+    final response = await get(Uri.parse('$host/scanner'));
+    expect(response.statusCode, 200);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    expect(body['type'], 'snapshot');
+    expect(body['rows'], isA<List>());
+  });
+
+  test('Live socket pushes a snapshot on connect', () async {
+    final ws = await WebSocket.connect('ws://127.0.0.1:$port/live');
+    final first = jsonDecode(await ws.first as String) as Map<String, dynamic>;
+    expect(first['type'], 'snapshot');
+    expect(first['stream'], isA<Map>());
+    await ws.close();
   });
 
   test('404', () async {

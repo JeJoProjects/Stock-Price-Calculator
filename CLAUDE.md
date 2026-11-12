@@ -164,17 +164,18 @@ flutter build windows
 ### Tests
 ```bat
 cd app
-flutter test        :: 112 tests - verified passing 2026-10-12
+flutter test        :: 117 tests - verified passing 2026-11-12
 cd ../backend
-dart test            :: 26 tests - verified passing 2026-10-04
+dart test            :: 40 tests - verified passing 2026-11-12
 ```
 App side: `calc_engine_test.dart`, `formatting_test.dart`,
 `market_types_test.dart`, `search_engine_test.dart`, `widget_test.dart`, and
 `test/ocr/*` (file classification, Excel extraction, sidecar HTTP client).
-Backend side: `finviz_client_test.dart` (real scraped-markup parsing,
-including Finviz's ticker-avatar-span HTML pollution), `server_test.dart`
-(health check, all three screener endpoints responding before their first
-poll completes, 404 handling), `yahoo_client_test.dart`,
+Backend side: `finviz_client_test.dart` (JSON-island parsing, paging,
+429), `yahoo_stream_test.dart`, `live_scanner_test.dart` (see Scanner Tab),
+`server_test.dart` (health check, screener endpoints and `/scanner`/`/live`
+responding before the first poll completes, 404 handling; binds a free
+port), `yahoo_client_test.dart`,
 `alpha_vantage_client_test.dart` (intraday/daily parsing, day1's
 latest-trading-day trim, rate-limit detection, Alpha Vantage's own error
 messages, missing-key guard), `candle_cache_test.dart` (TTL expiry,
@@ -198,7 +199,7 @@ today.
 
 ```
 StockCalcApp (MaterialApp)
-  └── HomePage — top-level TabController(length: 3)
+  └── HomePage — top-level TabController(length: 4)
         ├── Tab "Calculator"
         │     ├── MenuBarRow (File/Edit/View/Help + shortcuts)
         │     ├── TopBar
@@ -209,6 +210,9 @@ StockCalcApp (MaterialApp)
         │     ├── PurchasePanelCard × N + NewPurchaseCard
         │     ├── ChartPane (Finnhub quotes/candles, via the backend)
         │     └── CombinedStatsBar
+        ├── Tab "Scanner"
+        │     └── ScannerPanel — live momentum scanner (WebSocket push from
+        │           the backend's LiveScanner; see "Scanner Tab" below)
         ├── Tab "OCR"
         │     └── OcrPanel — drop/browse/paste → extracted, editable text
         └── Tab "PDF Editor"
@@ -261,10 +265,13 @@ parsing.
 
 There are **two independent polling loops**, not one:
 
-1. **Backend → Finviz/Yahoo**: controlled by the `SCREENER_POLL_SECONDS` env
-   var (default 30s, read in `backend/bin/server.dart`). This is how often
-   the backend process re-scrapes the actual external sites and refreshes
-   its in-memory cache.
+1. **Backend → Finviz/Yahoo**: Finviz is read by the live scanner every
+   `SCANNER_UNIVERSE_SECONDS` (default 60s, min 20s); Yahoo's screener API
+   every `SCREENER_POLL_SECONDS` (default 30s). Both are read in
+   `backend/bin/server.dart`. This is how often the backend process
+   re-scrapes the actual external sites. (The rail's prices on the Finviz/
+   Combined tabs are live anyway, since they come from the scanner, which
+   streams Yahoo trades between Finviz reads.)
 2. **App → backend**: controlled by the user-facing "Screener Refresh"
    setting (`AppSettings.screenerRefreshSeconds`, persisted via
    `shared_preferences`, also default 30s). This is how often the Flutter
@@ -287,7 +294,9 @@ Binds `InternetAddress.anyIPv4`, port from `PORT` env var (default **8090**).
 | `/profile/<symbol>` | GET | Proxies Finnhub company profile; 502 on failure |
 | `/candles/<symbol>?timeframe=` | GET | Serves OHLC candles from Alpha Vantage (free tier), disk-cached — see Candle Data below; 502 on failure |
 | `/search?q=&max=` | GET | Proxies Yahoo autocomplete via `symbol_search.dart` |
-| `/screener/finviz` | GET | Returns Finviz service's cached `latest`/`lastUpdated`/`lastError` |
+| `/scanner` | GET | Live scanner snapshot (`LiveScanner.snapshot()`): universe rows merged with live ticks, stream/universe status |
+| `/live` | WebSocket | Pushes the same snapshot on connect, then every ~350ms while anything changed, with a heartbeat at least every 5s |
+| `/screener/finviz` | GET | The scanner's `unusualVolume`-tagged rows, top 20 by change, in the old ScreenerRow shape (`lastUpdated` = last Finviz read) |
 | `/screener/yahoo` | GET | Same, for the Yahoo service |
 | `/screener/combined` | GET | **Intersection** (not union) of symbols present in both Finviz's and Yahoo's latest snapshots; Finviz's fields take precedence on overlap; sorted by `changePercent` descending |
 
@@ -498,6 +507,61 @@ setup_flutter.bat / run_flutter.bat   Build/run entrypoints (see above)
   loop, there's no reason to skip them.
 
 ---
+
+## Scanner Tab (live momentum scanner)
+
+Second top-level tab: a table of stocks that is pushed live as they move, modelled on day-trader momentum scanners. It has these columns:
+- CHG % and GAP % (heat-coloured)
+- SYMBOL, with flag icons for new high, volume spike, low float and high short interest
+- PRICE, which flashes on every trade
+- VOLUME, REL VOL, FLOAT
+- 1M % and 5M %
+- MOMO (a 0-100 bar)
+- SECTOR
+
+There are preset views (Momentum, Top Gainers, Top Gappers, Rel Volume, Low Float, New Highs, Top Losers), click-to-sort columns, a symbol search, a Filter dialog (price, relative volume, float, volume, live-only), an Alerts pane with an optional beep, and a details bar. Double-click a row, or use "Open in Calculator", to load the stock into the Calculator tab; "Finviz" opens its quote page.
+
+**Data flow (decisions that are easy to get wrong):**
+* **Finviz decides WHICH stocks; Yahoo's stream prices them.**
+  * The free Finviz screener is delayed, and per-second scraping gets blocked. `LiveScanner` (`backend/lib/live_scanner.dart`) therefore reads the union of `ta_unusualvolume` (up to 10 pages) and `ta_topgainers` (up to 8 pages) every `SCANNER_UNIVERSE_SECONDS`.
+  * Pages are fetched one at a time, 700 ms apart; a universe read takes about 20 s for about 300 stocks.
+  * On HTTP 429 it backs off: 2 minutes, doubling, up to 15 minutes.
+  * Do not "speed up" Finviz polling.
+* **Finviz parsing** (`finviz_client.dart`):
+  * The late-2026 redesign removed the `tr.styled-row` table. The data now comes from the JSON in `<script type="application/json" data-ssr-props=...>`, which has `data.rows[].text/numbers` plus `totalCount`, `firstRow` and `pageSize`.
+  * The custom view `v=152&c=1,2,3,4,5,6,25,30,59..67` adds float, short float, RSI, change-from-open, gap, open, average volume, relative volume, price, change and volume.
+  * Marketcap and float are reported in millions; the client multiplies them by 1e6.
+  * Paging is `r=21, 41, ...`.
+* **Live prices** (`yahoo_stream.dart`):
+  * Source: `wss://streamer.finance.yahoo.com/?version=2`. Unofficial and keyless, the same feed Yahoo's own pages use.
+  * Protocol: send `{"subscribe":[...]}`; each trade arrives as a base64 protobuf `PricingData`. Fields: 1 id, 2 price (float32), 3 time ms (zigzag), 5 exchange, 7 session (0 pre / 1 regular / 2 post / 3 extended), 8 change %, 9 day volume (zigzag), 10/11 day high/low, 12 change, 22 last size (zigzag).
+  * Subscriptions are diffed whenever the universe changes.
+  * Reconnect backoff is 1, 2, 5, 10, 20, 30 s; a silent socket is closed after 90 s.
+  * If the stream is down, rows keep Finviz's delayed numbers and the UI shows DELAYED.
+* **Derived live numbers**:
+  * Change is computed against Finviz's previous close.
+  * Live relative volume is Finviz relVol × (live volume / Finviz volume).
+  * 1- and 5-minute change come from a per-symbol price history: 1 sample per second, 6 minutes kept. Right after startup the history is shorter than the window, so the oldest sample is used and 1M can equal 5M.
+  * The momentum score is our own documented heuristic (`momentumScore`): 40% 5-minute change (5% = full), 25% 1-minute change (2% = full), 20% relVol (10× = full), 15% day change (30% = full). It is not a vendor's score.
+  * Flags: `lowFloat` (<10M), `relVolSpike` (≥5×), `newHigh`, `highShort` (≥20%), plus the universe tags `unusualVolume` and `topGainer`.
+* **Push, not poll:**
+  * The app's `ScannerClient` (`app/lib/scanner/scanner_client.dart`, plain `dart:io` WebSocket) holds `ws://localhost:8090/live` open and reconnects with backoff. A 20 s read timeout catches dead links.
+  * Each frame is a full snapshot (about 300 rows), which keeps the protocol stateless.
+  * The price flash uses each row's `seq` (one increment per trade), so reordering never causes a false flash.
+* Alerts (`AlertTracker` in `scanner_models.dart`) fire for:
+  * a new high with momentum ≥ 50,
+  * a relVol spike appearing,
+  * a stock entering the top 10 gainers.
+
+  The first snapshot is only the baseline, and each symbol+reason fires at most once per 5 minutes.
+
+**Tests:**
+- Backend: `finviz_client_test.dart` (synthetic JSON island, paging, 429), `yahoo_stream_test.dart` (real captured frame, protobuf wire types), `live_scanner_test.dart` (merge, history windows, momentum, universe refresh keeps live state), and `server_test.dart` (`/scanner`, `/live`; binds port 0 because 8091 is the OCR sidecar's).
+- App: `test/scanner_models_test.dart` (JSON, views, filters, alerts, client reconnect against a local WebSocket server).
+
+**Verified live 2026-11-12 (US regular session):**
+- 291-stock universe; stream connected; 457 trade messages in under a minute.
+- 21 of the listed prices changed within one 8-second window.
 
 ## PDF Editor Tab
 

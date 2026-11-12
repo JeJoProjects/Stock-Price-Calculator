@@ -15,6 +15,8 @@ import 'ocr/ocr_service.dart';
 import 'ocr/ocr_sidecar_client.dart';
 import 'ocr/ocr_sidecar_launcher.dart';
 import 'ocr/tesseract_client.dart';
+import 'scanner/scanner_client.dart';
+import 'scanner/scanner_models.dart';
 import 'search/search_engine.dart';
 import 'search/ticker_data.dart';
 import 'screener/screener_hub.dart';
@@ -31,6 +33,7 @@ import 'widgets/pdf_editor_panel.dart';
 import 'widgets/panel_resize_handle.dart';
 import 'widgets/preferences_dialog.dart';
 import 'widgets/purchase_panel_card.dart';
+import 'widgets/scanner_panel.dart';
 import 'widgets/screener_panel.dart';
 import 'widgets/search_bar_section.dart';
 import 'widgets/top_bar.dart';
@@ -92,6 +95,7 @@ class _HomePageState extends State<HomePage>
   SearchEngine? _searchEngine;
   final _searchFocusNode = FocusNode();
   final _screenerHub = ScreenerHub();
+  final _scannerClient = ScannerClient();
   final _marketClient = MarketDataService();
   final _backendLauncher = BackendLauncher();
   final _settingsService = SettingsService();
@@ -101,7 +105,7 @@ class _HomePageState extends State<HomePage>
   String _chartExchange = '';
   Timer? _windowSaveDebounce;
 
-  late final _mainTabController = TabController(length: 3, vsync: this);
+  late final _mainTabController = TabController(length: 4, vsync: this);
   final _ocrSidecarLauncher = OcrSidecarLauncher();
   OcrService _ocrService = OcrService();
 
@@ -206,6 +210,23 @@ class _HomePageState extends State<HomePage>
       _chartCompany = row.name;
       _chartExchange = row.exchange;
     });
+  }
+
+  /// From the Scanner tab: same as picking the stock in the screener rail
+  /// (new purchase panel at the live price + chart), then shows the
+  /// Calculator tab.
+  void _openScannerRow(ScannerRow row) {
+    _applyScreenerRow(ScreenerRow(
+      symbol: row.symbol,
+      name: row.name,
+      sector: row.sector,
+      marketCap: row.marketCap,
+      price: row.price,
+      changePercent: row.changePercent,
+      volume: row.volume,
+      source: 'scanner',
+    ));
+    _mainTabController.animateTo(0);
   }
 
   Future<void> _loadSearchEngine() async {
@@ -340,6 +361,7 @@ class _HomePageState extends State<HomePage>
                 controller: _mainTabController,
                 children: [
                   _calculatorTab(),
+                  ScannerPanel(client: _scannerClient, onOpen: _openScannerRow),
                   OcrPanel(service: _ocrService),
                   const PdfEditorPanel(),
                 ],
@@ -369,6 +391,7 @@ class _HomePageState extends State<HomePage>
         labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
         tabs: const [
           Tab(text: 'Calculator'),
+          Tab(text: 'Scanner'),
           Tab(text: 'OCR'),
           Tab(text: 'PDF Editor'),
         ],
@@ -530,6 +553,7 @@ class _HomePageState extends State<HomePage>
     _windowSaveDebounce?.cancel();
     _searchFocusNode.dispose();
     _screenerHub.dispose();
+    _scannerClient.dispose();
     _marketClient.close();
     _backendLauncher.stopIfOwned();
     _ocrSidecarLauncher.stopIfOwned();

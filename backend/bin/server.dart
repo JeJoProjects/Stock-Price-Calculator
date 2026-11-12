@@ -1,20 +1,24 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_web_socket/shelf_web_socket.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:backend/alpha_vantage_client.dart';
 import 'package:backend/candle_cache.dart';
 import 'package:backend/finnhub_client.dart';
 import 'package:backend/finviz_client.dart';
-import 'package:backend/finviz_screener_service.dart';
+import 'package:backend/live_scanner.dart';
 import 'package:backend/market_types.dart';
 import 'package:backend/screener_row.dart';
 import 'package:backend/symbol_search.dart';
 import 'package:backend/yahoo_client.dart';
 import 'package:backend/yahoo_screener_service.dart';
+import 'package:backend/yahoo_stream.dart';
 
 Response _json(Object body, {int status = 200}) => Response(
       status,
@@ -62,11 +66,17 @@ void main(List<String> args) async {
   // re-fetches these already-computed, cached results, not how often the
   // backend talks to Finviz/Yahoo.
   final pollSeconds = int.tryParse(Platform.environment['SCREENER_POLL_SECONDS'] ?? '') ?? 30;
-  final finvizScreener = FinvizScreenerService(
-    client: finvizClient,
-    pollInterval: Duration(seconds: pollSeconds),
+
+  // Live scanner: Finviz picks the stocks (delayed, so ~once a minute is
+  // plenty and avoids getting blocked), Yahoo's stream prices them per trade.
+  final universeSeconds = int.tryParse(Platform.environment['SCANNER_UNIVERSE_SECONDS'] ?? '') ?? 60;
+  final scanner = LiveScanner(
+    finviz: finvizClient,
+    stream: YahooStream(),
+    refreshInterval: Duration(seconds: universeSeconds.clamp(20, 3600)),
   );
-  finvizScreener.start();
+  scanner.start();
+
   final yahooScreener = YahooScreenerService(
     client: yahooClient,
     pollInterval: Duration(seconds: pollSeconds),
@@ -106,11 +116,13 @@ void main(List<String> args) async {
       final results = await symbolSearch.search(q, maxResults: maxResults);
       return _json({'results': results.map((r) => r.toJson()).toList()});
     })
+    ..get('/scanner', (Request req) => _json(scanner.snapshot()))
+    ..get('/live', _liveSocket(scanner))
     ..get('/screener/finviz', (Request req) {
       return _json({
-        'rows': finvizScreener.latest.map((r) => r.toJson()).toList(),
-        'lastUpdated': finvizScreener.lastUpdated?.toIso8601String(),
-        'error': finvizScreener.lastError,
+        'rows': _finvizRail(scanner).map((r) => r.toJson()).toList(),
+        'lastUpdated': scanner.universeUpdated?.toIso8601String(),
+        'error': scanner.universeError,
       });
     })
     ..get('/screener/yahoo', (Request req) {
@@ -121,7 +133,7 @@ void main(List<String> args) async {
       });
     })
     ..get('/screener/combined', (Request req) {
-      final finvizBySymbol = {for (final r in finvizScreener.latest) r.symbol: r};
+      final finvizBySymbol = {for (final r in _finvizRail(scanner, limit: 400)) r.symbol: r};
       final yahooBySymbol = {for (final r in yahooScreener.latest) r.symbol: r};
       final commonSymbols = finvizBySymbol.keys.toSet().intersection(yahooBySymbol.keys.toSet());
       final rows = commonSymbols.map((symbol) {
@@ -143,7 +155,7 @@ void main(List<String> args) async {
       }).toList()
         ..sort((a, b) => b.changePercent.compareTo(a.changePercent));
 
-      final finvizUpdated = finvizScreener.lastUpdated;
+      final finvizUpdated = scanner.universeUpdated;
       final yahooUpdated = yahooScreener.lastUpdated;
       DateTime? lastUpdated;
       if (finvizUpdated != null && yahooUpdated != null) {
@@ -155,13 +167,55 @@ void main(List<String> args) async {
       return _json({
         'rows': rows.map((r) => r.toJson()).toList(),
         'lastUpdated': lastUpdated?.toIso8601String(),
-        'error': finvizScreener.lastError ?? yahooScreener.lastError,
+        'error': scanner.universeError ?? yahooScreener.lastError,
       });
     });
 
-  final handler = Pipeline().addMiddleware(logRequests()).addHandler(router.call);
+  // No per-request logging: the app polls a few endpoints and the scanner
+  // socket is long-lived, so request logs would only be noise.
+  final handler = const Pipeline().addHandler(router.call);
 
   final port = int.parse(Platform.environment['PORT'] ?? '8090');
   final server = await serve(handler, InternetAddress.anyIPv4, port);
   print('StockCalc backend listening on port ${server.port}');
 }
+
+/// The screener rail's "Finviz" list, now fed live from the scanner: the
+/// unusual-volume stocks, top movers first.
+List<ScreenerRow> _finvizRail(LiveScanner scanner, {int limit = 20}) => scanner
+    .rows()
+    .where((r) => (r['flags'] as List).contains('unusualVolume'))
+    .take(limit)
+    .map((r) => ScreenerRow(
+          symbol: r['symbol'] as String,
+          name: r['name'] as String,
+          sector: r['sector'] as String,
+          marketCap: (r['marketCap'] as num).toDouble(),
+          price: (r['price'] as num).toDouble(),
+          changePercent: (r['changePercent'] as num).toDouble(),
+          volume: (r['volume'] as num).toDouble(),
+          source: 'finviz',
+        ))
+    .toList();
+
+/// Pushes scanner snapshots to a client: one immediately, then at most
+/// every [interval] while something changed, plus a heartbeat so the app can
+/// tell a quiet market from a dead connection.
+Handler _liveSocket(LiveScanner scanner, {Duration interval = const Duration(milliseconds: 350)}) =>
+    webSocketHandler((WebSocketChannel ws, String? _) {
+      var sentVersion = -1;
+      var lastSend = DateTime.fromMillisecondsSinceEpoch(0);
+      void send() {
+        sentVersion = scanner.version;
+        lastSend = DateTime.now();
+        ws.sink.add(jsonEncode(scanner.snapshot()));
+      }
+
+      send();
+      final timer = Timer.periodic(interval, (_) {
+        if (scanner.version != sentVersion || DateTime.now().difference(lastSend) > const Duration(seconds: 5)) {
+          send();
+        }
+      });
+      ws.stream.listen((_) {}, onDone: timer.cancel, onError: (Object _) => timer.cancel());
+    });

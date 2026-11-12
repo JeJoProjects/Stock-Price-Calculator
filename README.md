@@ -52,6 +52,7 @@ The app's second tab extracts text locally and offline from images, PDFs (digita
 
 ## Notes
 
+- The **Scanner** tab is a live momentum scanner. Finviz's free screens (unusual volume and top gainers, all pages) decide which stocks are listed, refreshed about once a minute because Finviz's free data is delayed. Yahoo's real-time stream then updates price, change, volume, 1/5-minute change and a momentum score on every trade. Updates are pushed to the app as they happen, so there is no refresh button. Neither source needs a key; both are unofficial feeds and can change without notice.
 - Set `FINNHUB_API_KEY` (free, from finnhub.io) for the quote strip/market cap, and `ALPHA_VANTAGE_API_KEY` (free, from alphavantage.co, no card) for the candlestick chart — Finnhub's own candle endpoint is now paywalled. The screener (Finviz/Yahoo) needs neither key. See CLAUDE.md's Candle Data section for the free-tier quota tradeoff.
 - The Windows build output is written to `app\build\windows\x64\runner\Release\stockcalc.exe`.
 - Only source and app data belong in git; generated SDK copies and build output stay ignored.

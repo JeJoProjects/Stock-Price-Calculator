@@ -15,6 +15,7 @@ class AppColors {
   static const accentBlue = Color(0xFF2962FF);
   static const profitGreen = Color(0xFF089981);
   static const lossRed = Color(0xFFF23645);
+  static const warnAmber = Color(0xFFFF9800);
   static const white = Color(0xFFFFFFFF);
 }
 
