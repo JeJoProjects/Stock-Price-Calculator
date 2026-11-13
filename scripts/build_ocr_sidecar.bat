@@ -76,8 +76,13 @@ if not exist "%OCR_VENV%\Scripts\python.exe" (
 
 echo Installing OCR sidecar dependencies ^(PaddleOCR - several hundred MB,
 echo this takes a few minutes the first time^)...
+set "PIP_REQUIREMENTS=%ROOT%pyocr\requirements.txt"
 "%OCR_VENV%\Scripts\python.exe" -m pip install --upgrade pip >nul 2>&1
-"%OCR_VENV%\Scripts\python.exe" -m pip install -r "%ROOT%pyocr\requirements.txt" pyinstaller
+"%OCR_VENV%\Scripts\python.exe" -m pip install -r "%PIP_REQUIREMENTS%" pyinstaller
+if errorlevel 1 (
+    echo WARNING: default package index failed - retrying against public PyPI...
+    "%OCR_VENV%\Scripts\python.exe" -m pip install --isolated --index-url https://pypi.org/simple -r "%PIP_REQUIREMENTS%" pyinstaller
+)
 if errorlevel 1 (
     echo WARNING: pip install failed - skipping the PaddleOCR sidecar.
     exit /b 0
